@@ -219,16 +219,21 @@ async function getDecisions(): Promise<DecisionsResponse> {
       await (await fetch(`${API_BASE}/decisions`)).json();
     if (!Array.isArray(raw) || raw.length === 0) return mockDecisions();
     return {
-      decisions: raw.map((r) => ({
-        id: r.id,
-        ticker: r.ticker,
-        action: r.score > 0.5 ? "BUY" : r.score < 0.2 ? "SELL" : "HOLD" as "BUY" | "SELL" | "HOLD",
-        quantity: Math.round(r.score * 100),
-        price: 0,
-        rationale: r.blocked_reason ?? `${r.type} signal · score ${r.score.toFixed(3)}`,
-        timestamp: r.timestamp,
-        status: r.status === "approved" ? "executed" : r.status === "blocked" ? "rejected" : "pending" as "executed" | "pending" | "rejected",
-      })),
+      decisions: raw.map((r) => {
+        // score > 0 means positive alpha or arb opportunity → BUY; blocked → HOLD
+        const action: "BUY" | "SELL" | "HOLD" = r.status === "blocked" ? "HOLD" : r.score > 0 ? "BUY" : "SELL";
+        const status: "executed" | "pending" | "rejected" = r.status === "approved" ? "executed" : r.status === "blocked" ? "rejected" : "pending";
+        return {
+          id: r.id,
+          ticker: r.ticker,
+          action,
+          quantity: null as unknown as number,  // not available from backend
+          price: null as unknown as number,      // not available from backend
+          rationale: r.blocked_reason ?? `${r.type} signal · score ${r.score.toFixed(3)}`,
+          timestamp: r.timestamp,
+          status,
+        };
+      }),
     };
   } catch {
     return mockDecisions();
@@ -419,12 +424,16 @@ function DecisionLog() {
                 {new Date(dec.timestamp).toLocaleTimeString()}
               </span>
             </div>
-            <div className="flex items-baseline gap-3 mb-1">
-              <span className="text-sm font-mono font-bold text-white">
-                ${dec.price.toFixed(2)}
-              </span>
-              <span className="text-[11px] text-zinc-400">× {dec.quantity} shares</span>
-            </div>
+            {dec.price != null && (
+              <div className="flex items-baseline gap-3 mb-1">
+                <span className="text-sm font-mono font-bold text-white">
+                  ${dec.price.toFixed(2)}
+                </span>
+                {dec.quantity != null && (
+                  <span className="text-[11px] text-zinc-400">× {dec.quantity} shares</span>
+                )}
+              </div>
+            )}
             <p className="text-[11px] text-zinc-500 leading-relaxed line-clamp-2">{dec.rationale}</p>
           </div>
         ))}
