@@ -1,11 +1,14 @@
 """FastAPI router exposing alpha scores, arbitrage signals, decisions, and agent status."""
 from typing import Any
 
-from fastapi import APIRouter
+from fastapi import APIRouter, Query
 
 from backend.analysis.alpha import compute_alpha_scores
 from backend.analysis.arbitrage import detect_arbitrage_opportunities
 from backend.agent.decision import latest_decisions, agent_status
+from backend.ghost import get_historical_prices, get_live_quotes
+
+TICKERS = ["AAPL", "TSLA", "NVDA", "QQQ"]
 
 router = APIRouter()
 
@@ -32,3 +35,32 @@ async def get_decisions() -> list[dict[str, Any]]:
 async def get_agent_status() -> dict[str, Any]:
     """Return current agent runtime status."""
     return agent_status
+
+
+@router.get("/data/prices")
+async def get_prices(
+    ticker: str = Query(None, description="Single ticker, e.g. AAPL. Omit for all watched tickers."),
+    days: int = Query(90, description="Number of days of history to return."),
+) -> list[dict[str, Any]]:
+    """Return raw historical prices from Vincent's DB for one or all tickers."""
+    tickers = [ticker] if ticker else TICKERS
+    rows: list[dict[str, Any]] = []
+    for t in tickers:
+        df = get_historical_prices(t, days=days)
+        if not df.empty:
+            rows.extend(df.to_dict(orient="records"))
+    return rows
+
+
+@router.get("/data/quotes")
+async def get_quotes(
+    ticker: str = Query(None, description="Single ticker, e.g. AAPL. Omit for all watched tickers."),
+) -> list[dict[str, Any]]:
+    """Return latest live quotes from Vincent's DB for one or all tickers."""
+    tickers = [ticker] if ticker else TICKERS
+    rows: list[dict[str, Any]] = []
+    for t in tickers:
+        df = get_live_quotes(t)
+        if not df.empty:
+            rows.extend(df.to_dict(orient="records"))
+    return rows
