@@ -1,81 +1,150 @@
-"""Stub for Vincent's data layer — replace with real implementation."""
-import random
-from datetime import datetime, timedelta, timezone
+"""
+Ghost Python client for QuantMind Financial Database.
+Exposes read/write helpers for historical_prices and live_quotes.
+"""
 
-import numpy as np
+import psycopg2
+import psycopg2.extras
 import pandas as pd
 
-TICKERS = ["AAPL", "TSLA", "NVDA", "QQQ"]
-BENCHMARKS = {"SPY": 450.0, "DJI": 380.0}
+GHOST_CONN_STR = (
+    "postgresql://tsdbadmin:dv8booyosevrcq1o"
+    "@gkli3ayfsr.fyphezo20t.tsdb.cloud.timescale.com:34961/tsdb"
+)
 
-# Seed prices so mocks are internally consistent
-_BASE_PRICES: dict[str, float] = {
-    "AAPL": 185.0, "TSLA": 245.0, "NVDA": 480.0, "QQQ": 420.0
-}
-
+# ---------------------------------------------------------------------------
+# Read helpers
+# ---------------------------------------------------------------------------
 
 def get_historical_prices(ticker: str, days: int = 90) -> pd.DataFrame:
-    """Return synthetic OHLCV + benchmark data for the requested ticker."""
-    rng = np.random.default_rng(seed=abs(hash(ticker)) % (2**32))
-    base = _BASE_PRICES.get(ticker, 200.0)
-    bmark_base = 450.0  # SPY proxy
+    """
+    Returns a DataFrame of historical OHLCV rows for *ticker* covering the
+    last *days* calendar days.
 
-    dates = [datetime.now(timezone.utc).date() - timedelta(days=i) for i in range(days - 1, -1, -1)]
-    # Simulate cumulative log-returns
-    log_returns = rng.normal(0.0005, 0.015, size=days)
-    bmark_log_returns = rng.normal(0.0003, 0.010, size=days)
+    Columns: ticker, date, open, high, low, close, volume,
+             benchmark, benchmark_close, benchmark_delta
 
-    closes = base * np.exp(np.cumsum(log_returns))
-    bmark_closes = bmark_base * np.exp(np.cumsum(bmark_log_returns))
+    Returns an empty DataFrame if the ticker is not found.
+    """
+    sql = """
+        SELECT
+            ticker, date, open, high, low, close, volume,
+            benchmark, benchmark_close, benchmark_delta
+        FROM historical_prices
+        WHERE ticker = %s
+          AND date >= CURRENT_DATE - (%s * INTERVAL '1 day')
+        ORDER BY date ASC
+    """
+    try:
+        with psycopg2.connect(GHOST_CONN_STR) as conn:
+            with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
+                cur.execute(sql, (ticker, days))
+                rows = cur.fetchall()
+    except Exception as exc:
+        raise RuntimeError(
+            f"get_historical_prices failed for ticker={ticker!r}: {exc}"
+        ) from exc
 
-    opens = closes * rng.uniform(0.99, 1.01, size=days)
-    highs = np.maximum(closes, opens) * rng.uniform(1.00, 1.015, size=days)
-    lows = np.minimum(closes, opens) * rng.uniform(0.985, 1.00, size=days)
-    volumes = rng.integers(5_000_000, 50_000_000, size=days)
-
-    bmark_delta = np.diff(bmark_closes, prepend=bmark_closes[0]) / np.where(
-        bmark_closes == 0, 1, bmark_closes
-    )
-
-    return pd.DataFrame({
-        "ticker": ticker,
-        "date": dates,
-        "open": np.round(opens, 2),
-        "high": np.round(highs, 2),
-        "low": np.round(lows, 2),
-        "close": np.round(closes, 2),
-        "volume": volumes,
-        "benchmark": "SPY",
-        "benchmark_close": np.round(bmark_closes, 2),
-        "benchmark_delta": np.round(bmark_delta, 6),
-    })
+    if not rows:
+        return pd.DataFrame(
+            columns=[
+                "ticker", "date", "open", "high", "low", "close", "volume",
+                "benchmark", "benchmark_close", "benchmark_delta",
+            ]
+        )
+    return pd.DataFrame(rows)
 
 
-def get_live_quotes(ticker: str) -> pd.DataFrame:
-    """Return synthetic live tick data (last 40 ticks) for the requested ticker."""
-    rng = np.random.default_rng(seed=abs(hash(ticker + "live")) % (2**32))
-    base = _BASE_PRICES.get(ticker, 200.0)
-    now = datetime.now(timezone.utc)
+def get_live_quotes(ticker: str, limit: int = 50) -> pd.DataFrame:
+    """
+    Returns the latest *limit* live-quote rows for *ticker*, ordered by
+    timestamp DESC.
 
-    n = 40
-    timestamps = [now - timedelta(seconds=(n - i) * 0.5) for i in range(n)]
-    prices = base + rng.normal(0, 0.10, size=n).cumsum()
-    prices = np.round(np.abs(prices), 2)
+    Columns: ticker, timestamp, price, bid, ask, spread, volume_delta
 
-    spreads = np.round(rng.uniform(0.01, 0.05, size=n), 4)
-    bids = np.round(prices - spreads / 2, 2)
-    asks = np.round(prices + spreads / 2, 2)
+    Returns an empty DataFrame if the ticker is not found.
+    """
+    sql = """
+        SELECT ticker, timestamp, price, bid, ask, spread, volume_delta
+        FROM live_quotes
+        WHERE ticker = %s
+        ORDER BY timestamp DESC
+        LIMIT %s
+    """
+    try:
+        with psycopg2.connect(GHOST_CONN_STR) as conn:
+            with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
+                cur.execute(sql, (ticker, limit))
+                rows = cur.fetchall()
+    except Exception as exc:
+        raise RuntimeError(
+            f"get_live_quotes failed for ticker={ticker!r}: {exc}"
+        ) from exc
 
-    # Occasional volume spike on the last few ticks for realism
-    vol_delta = rng.integers(100, 5000, size=n).astype(float)
-    vol_delta[-3:] *= rng.choice([1, 4], size=3)  # random spikes
+    if not rows:
+        return pd.DataFrame(
+            columns=["ticker", "timestamp", "price", "bid", "ask", "spread", "volume_delta"]
+        )
+    return pd.DataFrame(rows)
 
-    return pd.DataFrame({
-        "ticker": ticker,
-        "timestamp": [t.isoformat() for t in timestamps],
-        "price": prices,
-        "bid": bids,
-        "ask": asks,
-        "spread": spreads,
-        "volume_delta": vol_delta,
-    })
+
+# ---------------------------------------------------------------------------
+# Write helpers
+# ---------------------------------------------------------------------------
+
+def insert_historical_price(row: dict) -> None:
+    """
+    Insert a single row into historical_prices.
+    Silently ignores duplicate (ticker, date) pairs (ON CONFLICT DO NOTHING).
+
+    Expected keys: ticker, date, open, high, low, close, volume,
+                   benchmark, benchmark_close, benchmark_delta
+    """
+    sql = """
+        INSERT INTO historical_prices
+            (ticker, date, open, high, low, close, volume,
+             benchmark, benchmark_close, benchmark_delta)
+        VALUES
+            (%(ticker)s, %(date)s, %(open)s, %(high)s, %(low)s, %(close)s,
+             %(volume)s, %(benchmark)s, %(benchmark_close)s, %(benchmark_delta)s)
+        ON CONFLICT (ticker, date) DO NOTHING
+    """
+    try:
+        with psycopg2.connect(GHOST_CONN_STR) as conn:
+            with conn.cursor() as cur:
+                cur.execute(sql, row)
+            conn.commit()
+    except Exception as exc:
+        raise RuntimeError(
+            f"insert_historical_price failed for row={row!r}: {exc}"
+        ) from exc
+
+
+def upsert_live_quote(row: dict) -> None:
+    """
+    Upsert a single row into live_quotes.
+    On conflict for (ticker, timestamp), updates price, bid, ask, volume_delta.
+    Do NOT include 'spread' — it is a generated column (ask - bid).
+
+    Expected keys: ticker, timestamp, price, bid, ask, volume_delta
+    """
+    sql = """
+        INSERT INTO live_quotes
+            (ticker, timestamp, price, bid, ask, volume_delta)
+        VALUES
+            (%(ticker)s, %(timestamp)s, %(price)s, %(bid)s, %(ask)s, %(volume_delta)s)
+        ON CONFLICT (ticker, timestamp) DO UPDATE SET
+            price        = EXCLUDED.price,
+            bid          = EXCLUDED.bid,
+            ask          = EXCLUDED.ask,
+            volume_delta = EXCLUDED.volume_delta
+    """
+    try:
+        with psycopg2.connect(GHOST_CONN_STR) as conn:
+            with conn.cursor() as cur:
+                cur.execute(sql, row)
+            conn.commit()
+    except Exception as exc:
+        raise RuntimeError(
+            f"upsert_live_quote failed for row={row!r}: {exc}"
+        ) from exc
