@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useRef, useCallback } from "react";
+import { useState, useEffect, useRef } from "react";
 
 // ─── Config ───────────────────────────────────────────────────────────────────
 const API_BASE = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
@@ -86,29 +86,6 @@ type FeedbackPayload = {
 };
 
 // ─── Mock Data ────────────────────────────────────────────────────────────────
-
-function mockAlpha(): AlphaResponse {
-  const signals: Array<"BUY" | "SELL" | "HOLD"> = ["BUY", "SELL", "HOLD"];
-  return {
-    timestamp: new Date().toISOString(),
-    scores: ALL_TICKERS.map((ticker) => {
-      const score = parseFloat((Math.random() * 2 - 1).toFixed(3));
-      const sharpe = parseFloat((Math.random() * 3 - 1).toFixed(2));
-      const momentum_14d = parseFloat((Math.random() * 0.1 - 0.05).toFixed(4));
-      return {
-        ticker,
-        score,
-        signal: score > 0.2 ? "BUY" : score < -0.2 ? "SELL" : "HOLD",
-        confidence: Math.floor(50 + Math.random() * 50),
-        momentum: Array.from({ length: 12 }, () => parseFloat((Math.random() * 10 - 5).toFixed(2))),
-        alpha_30d: score,
-        alpha_90d: parseFloat((score * 0.8 + Math.random() * 0.1).toFixed(3)),
-        sharpe,
-        momentum_14d,
-      };
-    }),
-  };
-}
 
 function mockDecisions(): DecisionsResponse {
   const actions: Array<"BUY" | "SELL" | "HOLD"> = ["BUY", "SELL", "HOLD"];
@@ -204,7 +181,7 @@ async function getAlpha(): Promise<AlphaResponse> {
   try {
     const raw: Array<{ ticker: string; alpha_30d: number; alpha_90d: number; sharpe: number; momentum_14d: number }> =
       await (await fetch(`${API_BASE}/alpha`)).json();
-    if (!Array.isArray(raw) || raw.length === 0) return mockAlpha();
+    if (!Array.isArray(raw)) return { timestamp: new Date().toISOString(), scores: [] };
     return {
       timestamp: new Date().toISOString(),
       scores: raw.map((r) => {
@@ -224,7 +201,7 @@ async function getAlpha(): Promise<AlphaResponse> {
       }),
     };
   } catch {
-    return mockAlpha();
+    return { timestamp: new Date().toISOString(), scores: [] };
   }
 }
 
@@ -232,7 +209,7 @@ async function getDecisions(): Promise<DecisionsResponse> {
   try {
     const raw: Array<{ id: string; ticker: string; score: number; type: string; status: string; blocked_reason: string | null; timestamp: string }> =
       await (await fetch(`${API_BASE}/decisions`)).json();
-    if (!Array.isArray(raw) || raw.length === 0) return mockDecisions();
+    if (!Array.isArray(raw)) return { decisions: [] };
     return {
       decisions: raw.map((r) => {
         // score > 0 means positive alpha or arb opportunity → BUY; blocked → HOLD
@@ -552,13 +529,10 @@ function DecisionLog() {
 
 function OptimizerPanel() {
   const [data, setData] = useState<OptimizerResponse | null>(null);
-  const [prev, setPrev] = useState<OptimizerResponse | null>(null);
 
   useEffect(() => {
     const tick = async () => {
-      const d = await getOptimizer();
-      setPrev((p) => p);
-      setData(d);
+      setData(await getOptimizer());
     };
     tick();
     const id = setInterval(tick, 5000);
