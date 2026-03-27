@@ -1,5 +1,11 @@
 """QuantMind FastAPI application entry point."""
 import asyncio
+import os
+import sys
+
+# Ensure backend/ submodules (core, db, agents) are importable when
+# uvicorn is started from the project root as `backend.main`
+sys.path.insert(0, os.path.dirname(__file__))
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
