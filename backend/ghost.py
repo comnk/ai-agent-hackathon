@@ -148,3 +148,16 @@ def upsert_live_quote(row: dict) -> None:
         raise RuntimeError(
             f"upsert_live_quote failed for row={row!r}: {exc}"
         ) from exc
+
+# debug
+def run_query(query):
+    try:
+        with psycopg2.connect(GHOST_CONN_STR) as conn:
+            with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
+                cur.execute(query)
+                rows = cur.fetchall()
+    except Exception as exc:
+        raise RuntimeError(
+            f"run_query failed for query={query!r}: {exc}"
+        ) from exc
+    return pd.DataFrame(rows)
