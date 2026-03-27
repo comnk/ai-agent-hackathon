@@ -105,10 +105,20 @@ def _detect_hft_window(ticker: str, quotes: pd.DataFrame) -> dict[str, Any] | No
     return None
 
 
+def _cast_floats(df: pd.DataFrame) -> pd.DataFrame:
+    """Cast all numeric columns to float to avoid Decimal arithmetic errors."""
+    for col in ("price", "bid", "ask", "spread", "volume_delta"):
+        if col in df.columns:
+            df[col] = df[col].astype(float)
+    return df
+
+
 def detect_arbitrage_opportunities() -> list[dict[str, Any]]:
     """Fetch live quotes and return all detected arbitrage opportunities."""
     opportunities: list[dict[str, Any]] = []
-    quotes_cache: dict[str, pd.DataFrame] = {t: get_live_quotes(t) for t in TICKERS}
+    quotes_cache: dict[str, pd.DataFrame] = {
+        t: _cast_floats(get_live_quotes(t)) for t in TICKERS
+    }
 
     for ticker, quotes in quotes_cache.items():
         opp = _detect_slippage_window(ticker, quotes)
