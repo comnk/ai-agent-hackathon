@@ -18,6 +18,10 @@ type AlphaScore = {
   signal: "BUY" | "SELL" | "HOLD";
   confidence: number;     // 0–100
   momentum: number[];     // sparkline values
+  alpha_30d: number;      // annualised excess return vs SPY, 30-day window
+  alpha_90d: number;      // annualised excess return vs SPY, 90-day window
+  sharpe: number;         // risk-adjusted return (rf = 5%)
+  momentum_14d: number;   // 14-day rate-of-change
 };
 
 type AlphaResponse = {
@@ -89,14 +93,18 @@ function mockAlpha(): AlphaResponse {
     timestamp: new Date().toISOString(),
     scores: ALL_TICKERS.map((ticker) => {
       const score = parseFloat((Math.random() * 2 - 1).toFixed(3));
+      const sharpe = parseFloat((Math.random() * 3 - 1).toFixed(2));
+      const momentum_14d = parseFloat((Math.random() * 0.1 - 0.05).toFixed(4));
       return {
         ticker,
         score,
         signal: score > 0.2 ? "BUY" : score < -0.2 ? "SELL" : "HOLD",
         confidence: Math.floor(50 + Math.random() * 50),
-        momentum: Array.from({ length: 12 }, () =>
-          parseFloat((Math.random() * 10 - 5).toFixed(2))
-        ),
+        momentum: Array.from({ length: 12 }, () => parseFloat((Math.random() * 10 - 5).toFixed(2))),
+        alpha_30d: score,
+        alpha_90d: parseFloat((score * 0.8 + Math.random() * 0.1).toFixed(3)),
+        sharpe,
+        momentum_14d,
       };
     }),
   };
@@ -200,12 +208,19 @@ async function getAlpha(): Promise<AlphaResponse> {
     return {
       timestamp: new Date().toISOString(),
       scores: raw.map((r) => {
-        const score = Math.max(-1, Math.min(1, r.alpha_30d ?? 0));
-        const signal: "BUY" | "SELL" | "HOLD" = score > 0.1 ? "BUY" : score < -0.1 ? "SELL" : "HOLD";
-        const confidence = Math.min(100, Math.max(0, Math.round(Math.abs(r.sharpe ?? 0) * 40)));
+        const a30 = r.alpha_30d ?? 0;
+        const a90 = r.alpha_90d ?? 0;
+        const sharpe = r.sharpe ?? 0;
         const m = r.momentum_14d ?? 0;
-        const momentum = Array.from({ length: 12 }, (_, i) => parseFloat((m * (0.5 + i / 12)).toFixed(3)));
-        return { ticker: r.ticker, score, signal, confidence, momentum };
+        const score = Math.max(-1, Math.min(1, a30));
+        const signal: "BUY" | "SELL" | "HOLD" = a30 > 0.05 ? "BUY" : a30 < -0.05 ? "SELL" : "HOLD";
+        // Confidence: higher when 30d & 90d agree in direction + positive Sharpe
+        const directionAgree = Math.sign(a30) === Math.sign(a90) ? 40 : 10;
+        const sharpeBoost = sharpe > 0 ? Math.min(40, sharpe * 20) : 0;
+        const momentumBoost = Math.abs(m) > 0.02 ? 20 : 10;
+        const confidence = Math.round(Math.min(100, directionAgree + sharpeBoost + momentumBoost));
+        const momentum = Array.from({ length: 12 }, (_, i) => parseFloat((m * (0.5 + i / 12)).toFixed(4)));
+        return { ticker: r.ticker, score, signal, confidence, momentum, alpha_30d: a30, alpha_90d: a90, sharpe, momentum_14d: m };
       }),
     };
   } catch {
@@ -351,33 +366,101 @@ function AlphaPanel() {
     return () => clearInterval(id);
   }, []);
 
+  const sharpeLabel = (v: number) => v >= 2 ? "excellent" : v >= 1 ? "good" : v >= 0 ? "weak" : "negative";
+  const sharpeColor = (v: number) => v >= 1 ? "text-emerald-400" : v >= 0 ? "text-zinc-300" : "text-red-400";
+
   return (
-    <PanelShell title="Alpha Scores" subtitle="Signal strength across watched tickers" live>
-      <div className="p-3 flex flex-col gap-2">
+    <PanelShell
+      title="Alpha Scores"
+      subtitle="How much each ticker beats or lags SPY (annualised, rf = 5%)"
+      live
+    >
+      <div className="flex flex-col divide-y divide-zinc-800/60">
         {(data?.scores ?? []).map((s) => {
-          const isPos = s.score >= 0;
+          const isPos = s.alpha_30d >= 0;
           const barColor = s.signal === "BUY" ? "bg-emerald-500" : s.signal === "SELL" ? "bg-red-500" : "bg-zinc-600";
+          const pct = (v: number) => `${v >= 0 ? "+" : ""}${(v * 100).toFixed(1)}%`;
+          const trendAgree = Math.sign(s.alpha_30d) === Math.sign(s.alpha_90d);
+
           return (
-            <div key={s.ticker} className="flex items-center gap-3">
-              <span className="text-xs font-mono font-bold text-zinc-200 w-10 shrink-0">{s.ticker}</span>
-              <Badge label={s.signal} variant={s.signal.toLowerCase() as "buy" | "sell" | "hold"} />
-              <div className="flex-1">
-                <div className="flex items-center justify-between mb-0.5">
-                  <span className={`text-[10px] font-mono ${isPos ? "text-emerald-400" : "text-red-400"}`}>
-                    {isPos ? "+" : ""}{s.score.toFixed(3)}
-                  </span>
-                  <span className="text-[10px] text-zinc-500">{s.confidence}% conf</span>
-                </div>
-                <MiniBar value={Math.abs(s.score) * 100} max={100} color={barColor} />
+            <div key={s.ticker} className="px-4 py-3">
+
+              {/* Row 1: ticker · signal · confidence · sparkline */}
+              <div className="flex items-center gap-2 mb-2">
+                <span className="text-xs font-mono font-bold text-zinc-100 w-10 shrink-0">{s.ticker}</span>
+                <span title={`Signal: ${s.signal === "BUY" ? "positive alpha — outperforming SPY" : s.signal === "SELL" ? "negative alpha — underperforming SPY" : "alpha near zero — no clear edge"}`}>
+                  <Badge label={s.signal} variant={s.signal.toLowerCase() as "buy" | "sell" | "hold"} />
+                </span>
+                <span
+                  className="text-[10px] text-zinc-500 ml-auto"
+                  title={`Confidence is based on: 30d/90d alpha direction agreement + positive Sharpe + momentum confirmation. Higher = more consistent signal.`}
+                >
+                  {s.confidence}% conf
+                </span>
+                <span title="14-day price momentum sparkline">
+                  <MiniSparkline values={s.momentum} positive={isPos} />
+                </span>
               </div>
-              <MiniSparkline values={s.momentum} positive={isPos} />
+
+              {/* Row 2: alpha vs SPY bar */}
+              <div
+                className="flex items-center gap-2 mb-1.5"
+                title={`30-day alpha: this stock returned ${pct(s.alpha_30d)} more (or less) than SPY on an annualised basis over the last 30 days`}
+              >
+                <span className="text-[10px] text-zinc-600 w-14 shrink-0">vs SPY 30d</span>
+                <MiniBar value={Math.abs(s.alpha_30d) * 100} max={50} color={barColor} />
+                <span className={`text-[10px] font-mono font-bold w-14 text-right shrink-0 ${isPos ? "text-emerald-400" : "text-red-400"}`}>
+                  {pct(s.alpha_30d)}
+                </span>
+              </div>
+
+              {/* Row 3: stats grid */}
+              <div className="grid grid-cols-3 gap-x-2 text-[10px] font-mono">
+                <span
+                  className="text-zinc-500"
+                  title="90-day alpha vs SPY. Compare with 30d: if they agree in direction the signal is more reliable."
+                >
+                  90d alpha
+                  <span className={`ml-1 ${s.alpha_90d >= 0 ? "text-emerald-400" : "text-red-400"}`}>
+                    {pct(s.alpha_90d)}
+                  </span>
+                </span>
+                <span
+                  className="text-zinc-500"
+                  title={`Sharpe ratio = (annualised return − 5% risk-free rate) ÷ annualised volatility. Above 1.0 is good. This is ${sharpeLabel(s.sharpe)}.`}
+                >
+                  Sharpe
+                  <span className={`ml-1 ${sharpeColor(s.sharpe)}`}>
+                    {s.sharpe.toFixed(2)}
+                  </span>
+                </span>
+                <span
+                  className="text-zinc-500"
+                  title={`14-day momentum: price changed ${pct(s.momentum_14d)} over the last 14 trading days. Positive = accelerating upward.`}
+                >
+                  14d mom
+                  <span className={`ml-1 ${s.momentum_14d >= 0 ? "text-emerald-400" : "text-red-400"}`}>
+                    {pct(s.momentum_14d)}
+                  </span>
+                </span>
+              </div>
+
+              {/* Warning: mixed signals */}
+              {!trendAgree && (
+                <div
+                  className="mt-1.5 text-[10px] text-amber-500"
+                  title="30d and 90d alpha point in opposite directions. The short-term trend may be reversing — treat this signal with caution."
+                >
+                  ⚠ mixed signal — 30d and 90d alpha disagree
+                </div>
+              )}
             </div>
           );
         })}
       </div>
-      <div className="px-3 pb-2">
+      <div className="px-4 pb-2 border-t border-zinc-800/60 pt-2">
         <p className="text-[10px] text-zinc-600">
-          Updated {data ? new Date(data.timestamp).toLocaleTimeString() : "—"} · polling 2s
+          Updated {data ? new Date(data.timestamp).toLocaleTimeString() : "—"} · polling 2s · alpha = annualised ticker return − SPY return
         </p>
       </div>
     </PanelShell>
@@ -409,34 +492,57 @@ function DecisionLog() {
   }, []);
 
   return (
-    <PanelShell title="Decision Log" subtitle="Overmind agent trade decisions" live>
+    <PanelShell
+      title="Decision Log"
+      subtitle="Scored opportunities after Senso risk gate · updated every 5s"
+      live
+    >
       <div className="flex flex-col divide-y divide-zinc-800/60">
         {(data?.decisions ?? []).map((dec) => (
           <div
             key={dec.id}
             className={`px-4 py-3 transition-colors duration-700 ${flash === dec.id ? "bg-emerald-950/40" : ""}`}
           >
-            <div className="flex items-center gap-2 mb-1">
+            {/* Row 1: ticker · action · status · time */}
+            <div className="flex items-center gap-2 mb-1.5">
               <span className="text-xs font-mono font-bold text-zinc-100">{dec.ticker}</span>
-              <Badge label={dec.action} variant={dec.action.toLowerCase() as "buy" | "sell" | "hold"} />
-              <Badge label={dec.status} variant={dec.status} />
-              <span className="ml-auto text-[10px] text-zinc-500 font-mono">
+              <span title={`Action: ${dec.action === "BUY" ? "positive alpha signal — agent recommends entering a long position" : dec.action === "SELL" ? "negative alpha — agent recommends avoiding or exiting" : "signal below threshold — no action taken"}`}>
+                <Badge label={dec.action} variant={dec.action.toLowerCase() as "buy" | "sell" | "hold"} />
+              </span>
+              <span title={`Senso risk gate: ${dec.status === "executed" ? "approved — passed all risk checks" : dec.status === "rejected" ? "blocked — failed Senso risk gate (e.g. score too low, risk limits exceeded)" : "pending — awaiting risk gate evaluation"}`}>
+                <Badge label={dec.status} variant={dec.status} />
+              </span>
+              <span
+                className="ml-auto text-[10px] text-zinc-500 font-mono"
+                title="Time this decision was generated by the agent loop"
+              >
                 {new Date(dec.timestamp).toLocaleTimeString()}
               </span>
             </div>
-            {dec.price != null && (
-              <div className="flex items-baseline gap-3 mb-1">
-                <span className="text-sm font-mono font-bold text-white">
-                  ${dec.price.toFixed(2)}
-                </span>
-                {dec.quantity != null && (
-                  <span className="text-[11px] text-zinc-400">× {dec.quantity} shares</span>
-                )}
-              </div>
-            )}
-            <p className="text-[11px] text-zinc-500 leading-relaxed line-clamp-2">{dec.rationale}</p>
+
+            {/* Row 2: decision ID + score */}
+            <div className="flex items-center gap-3 mb-1 text-[10px] font-mono text-zinc-500">
+              <span title="Unique decision ID generated by the agent loop">{dec.id}</span>
+              <span className="text-zinc-700">·</span>
+              <span title="Weighted score: 40% alpha signal strength + 60% arbitrage confidence. Higher = stronger combined signal.">
+                score —
+              </span>
+            </div>
+
+            {/* Row 3: rationale */}
+            <p
+              className="text-[11px] text-zinc-400 leading-relaxed"
+              title={dec.status === "rejected" ? "Reason this decision was blocked by the Senso risk gate" : "Signal type and score that triggered this decision"}
+            >
+              {dec.rationale}
+            </p>
           </div>
         ))}
+      </div>
+      <div className="px-4 pb-2 border-t border-zinc-800/60 pt-2">
+        <p className="text-[10px] text-zinc-600">
+          Score = 40% alpha signal + 60% arb confidence · Senso gates each decision · polling 3s
+        </p>
       </div>
     </PanelShell>
   );
