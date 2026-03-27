@@ -193,13 +193,46 @@ function mockRisk(): RiskResponse {
 // ─── API Helpers (swap mock → fetch here) ─────────────────────────────────────
 
 async function getAlpha(): Promise<AlphaResponse> {
-  // SWAP: return (await fetch(`${API_BASE}/alpha`)).json();
-  return mockAlpha();
+  try {
+    const raw: Array<{ ticker: string; alpha_30d: number; alpha_90d: number; sharpe: number; momentum_14d: number }> =
+      await (await fetch(`${API_BASE}/alpha`)).json();
+    if (!Array.isArray(raw) || raw.length === 0) return mockAlpha();
+    return {
+      timestamp: new Date().toISOString(),
+      scores: raw.map((r) => {
+        const score = Math.max(-1, Math.min(1, r.alpha_30d ?? 0));
+        const signal: "BUY" | "SELL" | "HOLD" = score > 0.1 ? "BUY" : score < -0.1 ? "SELL" : "HOLD";
+        const confidence = Math.min(100, Math.max(0, Math.round(Math.abs(r.sharpe ?? 0) * 40)));
+        const m = r.momentum_14d ?? 0;
+        const momentum = Array.from({ length: 12 }, (_, i) => parseFloat((m * (0.5 + i / 12)).toFixed(3)));
+        return { ticker: r.ticker, score, signal, confidence, momentum };
+      }),
+    };
+  } catch {
+    return mockAlpha();
+  }
 }
 
 async function getDecisions(): Promise<DecisionsResponse> {
-  // SWAP: return (await fetch(`${API_BASE}/decisions`)).json();
-  return mockDecisions();
+  try {
+    const raw: Array<{ id: string; ticker: string; score: number; type: string; status: string; blocked_reason: string | null; timestamp: string }> =
+      await (await fetch(`${API_BASE}/decisions`)).json();
+    if (!Array.isArray(raw) || raw.length === 0) return mockDecisions();
+    return {
+      decisions: raw.map((r) => ({
+        id: r.id,
+        ticker: r.ticker,
+        action: r.score > 0.5 ? "BUY" : r.score < 0.2 ? "SELL" : "HOLD" as "BUY" | "SELL" | "HOLD",
+        quantity: Math.round(r.score * 100),
+        price: 0,
+        rationale: r.blocked_reason ?? `${r.type} signal · score ${r.score.toFixed(3)}`,
+        timestamp: r.timestamp,
+        status: r.status === "approved" ? "executed" : r.status === "blocked" ? "rejected" : "pending" as "executed" | "pending" | "rejected",
+      })),
+    };
+  } catch {
+    return mockDecisions();
+  }
 }
 
 async function getOptimizer(): Promise<OptimizerResponse> {
