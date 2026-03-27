@@ -1410,6 +1410,184 @@ function FeedbackPanel() {
   );
 }
 
+// ─── About Section ────────────────────────────────────────────────────────────
+
+const ABOUT_SECTIONS = [
+  {
+    id: "what",
+    title: "What is QuantMind?",
+    content: (
+      <p className="text-[12px] text-zinc-400 leading-relaxed">
+        QuantMind is an autonomous AI agent that continuously analyzes financial markets, identifies alpha
+        opportunities, and gets smarter after every cycle. It monitors multiple tickers (AAPL, TSLA, NVDA, QQQ)
+        against benchmark indexes (SPY, DJI), detects high-frequency arbitrage windows and positive slippage
+        opportunities, and refines its own strategy based on what worked and what didn&apos;t — with no human required
+        to keep it running. Every decision is logged, evaluated, and fed back into its own model through
+        Overmind&apos;s optimization loop. Traders can also provide direct feedback to fine-tune the agent&apos;s risk
+        appetite and market focus.
+      </p>
+    ),
+  },
+  {
+    id: "calculations",
+    title: "How are scores & decisions calculated?",
+    content: (
+      <div className="flex flex-col gap-3">
+        <div>
+          <p className="text-[11px] font-bold text-zinc-200 mb-0.5">Alpha Score (−1 to +1)</p>
+          <p className="text-[11px] text-zinc-400 leading-relaxed font-mono bg-zinc-900 rounded px-2 py-1 mb-1">
+            alpha = annualised(ticker_return) − annualised(SPY_return)
+          </p>
+          <p className="text-[11px] text-zinc-400 leading-relaxed">
+            Measures how much a stock outperforms or lags the S&amp;P 500 over 30-day and 90-day rolling windows.
+            alpha_30d &gt; +5% → BUY signal; &lt; −5% → SELL; otherwise HOLD.
+          </p>
+        </div>
+        <div>
+          <p className="text-[11px] font-bold text-zinc-200 mb-0.5">Confidence % (0–100)</p>
+          <p className="text-[11px] text-zinc-400 leading-relaxed font-mono bg-zinc-900 rounded px-2 py-1 mb-1">
+            confidence = direction_agreement(40) + sharpe_boost(0–40) + momentum_boost(10–20)
+          </p>
+          <p className="text-[11px] text-zinc-400 leading-relaxed">
+            40 pts if 30d and 90d alpha agree in direction, up to 40 pts for positive Sharpe ratio, up to 20 pts
+            for strong 14-day momentum.
+          </p>
+        </div>
+        <div>
+          <p className="text-[11px] font-bold text-zinc-200 mb-0.5">Decision Score (0–1)</p>
+          <p className="text-[11px] text-zinc-400 leading-relaxed font-mono bg-zinc-900 rounded px-2 py-1 mb-1">
+            score = 0.4 × alpha_signal + 0.6 × arb_confidence
+          </p>
+          <p className="text-[11px] text-zinc-400 leading-relaxed">
+            Composite signal strength combining alpha and arbitrage signals. Senso passes decisions with score ≥ 0.3
+            through the probabilistic risk gate; below that threshold the decision is rejected.
+          </p>
+        </div>
+        <div>
+          <p className="text-[11px] font-bold text-zinc-200 mb-0.5">Sharpe Ratio</p>
+          <p className="text-[11px] text-zinc-400 leading-relaxed font-mono bg-zinc-900 rounded px-2 py-1 mb-1">
+            sharpe = (annualised_return − 5% risk-free rate) ÷ annualised_volatility
+          </p>
+          <p className="text-[11px] text-zinc-400 leading-relaxed">
+            Risk-adjusted return. Above 1.0 is good, above 2.0 is excellent. Negative means the stock doesn&apos;t
+            compensate for its own risk.
+          </p>
+        </div>
+      </div>
+    ),
+  },
+  {
+    id: "panels",
+    title: "What does each panel show?",
+    content: (
+      <div className="flex flex-col gap-3">
+        {[
+          {
+            name: "Alpha Scores",
+            desc: "Displays each ticker's excess return vs SPY (alpha), Sharpe ratio, 14-day momentum, confidence score, and directional signal (BUY/SELL/HOLD). Also includes live bid/ask quotes and 90-day price history chart. Refreshes every 2 seconds.",
+          },
+          {
+            name: "Decision Log",
+            desc: "A live feed of every opportunity the agent evaluated. Each entry shows the signal type that triggered it, composite score, alpha contribution, arbitrage confidence, Senso's verdict (executed / pending / rejected), and the raw signal detail for auditability. Refreshes every 3 seconds.",
+          },
+          {
+            name: "Overmind Optimizer",
+            desc: "Shows the agent's self-improvement loop. After each epoch, Overmind evaluates portfolio performance (Sharpe, win rate, avg return) and suggests parameter adjustments — e.g. extending the lookback period or tightening stop-loss. These suggestions are fed back into the agent's next cycle.",
+          },
+          {
+            name: "Senso Risk",
+            desc: "Portfolio-level risk dashboard. Tracks Value at Risk (VaR), max drawdown, and correlation risk. Per-ticker metrics include 1-day VaR, portfolio exposure %, annualised volatility, and beta vs market. Red alert badges flag positions exceeding risk thresholds.",
+          },
+          {
+            name: "Trader Feedback",
+            desc: "Allows traders to rate any decision (1–5 stars) and leave a comment. Feedback is sent to the agent and used by Overmind to adjust risk appetite and market focus — making the agent adaptive to human intent alongside market data.",
+          },
+        ].map((p) => (
+          <div key={p.name}>
+            <p className="text-[11px] font-bold text-zinc-200 mb-0.5">{p.name}</p>
+            <p className="text-[11px] text-zinc-400 leading-relaxed">{p.desc}</p>
+          </div>
+        ))}
+      </div>
+    ),
+  },
+  {
+    id: "glossary",
+    title: "Glossary",
+    content: (
+      <div className="flex flex-col gap-2.5">
+        {[
+          { term: "Alpha", def: "Annualised excess return of a ticker vs the SPY benchmark. Positive = outperforming the market; negative = lagging. Calculated over 30-day and 90-day rolling windows." },
+          { term: "Slippage Window", def: "A moment when the bid-ask spread is unusually tight — less than 66% of its 20-tick rolling average. This low-friction window lets the agent enter or exit a position cheaply with minimal market impact." },
+          { term: "HFT Window", def: "High-Frequency Trading window: volume delta spiked more than 2σ above average AND spread compressed more than 10% simultaneously. A short-lived microstructure opportunity." },
+          { term: "Price Divergence", def: "Two correlated tickers (e.g. AAPL/QQQ) have drifted apart by more than 2 standard deviations. The agent bets on mean-reversion — that prices will converge again." },
+          { term: "Sharpe Ratio", def: "Risk-adjusted return: (annualised return − 5% risk-free rate) ÷ annualised volatility. Above 1.0 is good; above 2.0 is excellent; negative means the position doesn't compensate for its risk." },
+          { term: "14d Momentum", def: "Rate-of-change over the last 14 trading days: (close today − close 14d ago) ÷ close 14d ago. Positive = trending up. Used as secondary confirmation alongside alpha." },
+          { term: "Confidence %", def: "0–100 score that aggregates direction agreement between 30d/90d alpha (40 pts), Sharpe strength (0–40 pts), and momentum magnitude (10–20 pts)." },
+          { term: "VaR (Value at Risk)", def: "Estimated maximum loss on a position in a single day at a given confidence level. A 1-day VaR of 1.5% means the agent expects losses to stay below 1.5% on 95% of trading days." },
+          { term: "Beta", def: "Sensitivity of a stock's returns relative to the market (SPY). Beta > 1 = amplified moves; Beta < 1 = muted moves; Beta < 0 = inversely correlated." },
+          { term: "Arb Confidence", def: "How strong the arbitrage signal is (0–1). For Slippage Window: how far the spread is below the rolling average. For Price Divergence: how many standard deviations the pair has drifted above 2.0." },
+          { term: "Epoch", def: "One full Overmind optimization cycle. After each epoch, the agent evaluates its decisions, updates parameters, and starts the next learning cycle." },
+          { term: "Senso", def: "The risk gate layer that approves or rejects decisions. It applies a score threshold (≥ 0.3) and a probabilistic gate to control position frequency and risk exposure." },
+          { term: "Overmind", def: "The meta-learning loop that evaluates performance across epochs and adjusts agent parameters — lookback periods, stop-loss levels, position sizes, and entry thresholds." },
+        ].map((g) => (
+          <div key={g.term} className="flex gap-2">
+            <span className="text-[11px] font-bold text-zinc-200 shrink-0 w-36">{g.term}</span>
+            <span className="text-[11px] text-zinc-400 leading-relaxed">{g.def}</span>
+          </div>
+        ))}
+      </div>
+    ),
+  },
+];
+
+function AboutSection() {
+  const [open, setOpen] = useState(false);
+  const [activeTab, setActiveTab] = useState("what");
+
+  return (
+    <div className="max-w-7xl mx-auto mb-4">
+      <button
+        onClick={() => setOpen((v) => !v)}
+        className={`flex items-center gap-2 px-3 py-1.5 rounded-lg border text-[11px] font-bold uppercase tracking-widest transition-all ${
+          open
+            ? "border-zinc-600 bg-zinc-900 text-zinc-200"
+            : "border-zinc-800 bg-zinc-950 text-zinc-500 hover:text-zinc-300 hover:border-zinc-700"
+        }`}
+      >
+        <span>{open ? "▾" : "▸"}</span>
+        About QuantMind
+      </button>
+
+      {open && (
+        <div className="mt-2 rounded-2xl border border-zinc-800 bg-zinc-950 overflow-hidden">
+          {/* Tab bar */}
+          <div className="flex border-b border-zinc-800 px-4 pt-3 gap-1 flex-wrap">
+            {ABOUT_SECTIONS.map((s) => (
+              <button
+                key={s.id}
+                onClick={() => setActiveTab(s.id)}
+                className={`px-3 py-1.5 text-[10px] font-bold uppercase tracking-widest rounded-t-md transition-all -mb-px ${
+                  activeTab === s.id
+                    ? "border border-b-zinc-950 border-zinc-700 bg-zinc-950 text-zinc-100"
+                    : "text-zinc-500 hover:text-zinc-300"
+                }`}
+              >
+                {s.title}
+              </button>
+            ))}
+          </div>
+
+          {/* Tab content */}
+          <div className="p-5">
+            {ABOUT_SECTIONS.find((s) => s.id === activeTab)?.content}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 // ─── Agent Dashboard Root ─────────────────────────────────────────────────────
 
 export default function AgentDashboard() {
@@ -1454,6 +1632,9 @@ export default function AgentDashboard() {
           </div>
         </div>
       </div>
+
+      {/* About */}
+      <AboutSection />
 
       {/* 5-Panel Grid */}
       <div className="max-w-7xl mx-auto grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
