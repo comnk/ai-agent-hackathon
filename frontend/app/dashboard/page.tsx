@@ -388,11 +388,13 @@ function PanelShell({
   title,
   subtitle,
   live,
+  maxHeight = "480px",
   children,
 }: {
   title: string;
   subtitle?: string;
   live?: boolean;
+  maxHeight?: string;
   children: React.ReactNode;
 }) {
   return (
@@ -413,7 +415,7 @@ function PanelShell({
           </span>
         </div>
       </div>
-      <div className="flex-1 overflow-auto">{children}</div>
+      <div className="flex-1 overflow-y-auto" style={{ maxHeight }}>{children}</div>
     </div>
   );
 }
@@ -862,6 +864,7 @@ function DecisionLog() {
     <PanelShell
       title="Decision Log"
       subtitle="Scored opportunities after Senso risk gate · updated every 5s"
+      maxHeight="560px"
       live
     >
       <div className="flex flex-col divide-y divide-zinc-800/60">
