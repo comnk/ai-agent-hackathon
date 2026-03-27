@@ -3,9 +3,7 @@ from typing import Any
 
 from fastapi import APIRouter, Query
 
-from backend.analysis.alpha import compute_alpha_scores
-from backend.analysis.arbitrage import detect_arbitrage_opportunities
-from backend.agent.decision import latest_decisions, agent_status
+from backend.agent.decision import latest_decisions, latest_alpha, latest_arbitrage, agent_status
 from backend.ghost import get_historical_prices, get_live_quotes
 
 TICKERS = ["AAPL", "TSLA", "NVDA", "QQQ"]
@@ -15,14 +13,14 @@ router = APIRouter()
 
 @router.get("/alpha", response_model=list[dict])
 async def get_alpha() -> list[dict[str, Any]]:
-    """Return latest alpha scores for all watched tickers, sorted by alpha_30d."""
-    return compute_alpha_scores()
+    """Return latest alpha scores cached by the agent loop."""
+    return latest_alpha
 
 
 @router.get("/arbitrage", response_model=list[dict])
 async def get_arbitrage() -> list[dict[str, Any]]:
-    """Return currently detected arbitrage opportunities."""
-    return detect_arbitrage_opportunities()
+    """Return latest arbitrage opportunities cached by the agent loop."""
+    return latest_arbitrage
 
 
 @router.get("/decisions", response_model=list[dict])

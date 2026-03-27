@@ -14,6 +14,8 @@ LOOP_INTERVAL = 5  # seconds
 
 # Module-level state (read by the API router)
 latest_decisions: list[dict[str, Any]] = []
+latest_alpha: list[dict[str, Any]] = []
+latest_arbitrage: list[dict[str, Any]] = []
 agent_status: dict[str, Any] = {
     "running": False,
     "last_run": None,
@@ -30,10 +32,10 @@ def _build_unified_opportunities(
     """Merge alpha and arbitrage signals into a single opportunity list."""
     unified: list[dict[str, Any]] = []
 
-    # Alpha signals — normalise score to [0,1] for weighting
-    max_alpha = max((abs(a["alpha_30d"]) for a in alpha_scores), default=1) or 1
+    # Alpha signals — only positive alpha contributes; normalise to [0,1]
+    max_alpha = max((a["alpha_30d"] for a in alpha_scores), default=1) or 1
     for a in alpha_scores:
-        alpha_signal = min(1.0, abs(a["alpha_30d"]) / max_alpha)
+        alpha_signal = min(1.0, max(0.0, a["alpha_30d"] / max_alpha))
         unified.append({
             "ticker": a["ticker"],
             "type": "alpha",
@@ -76,11 +78,15 @@ def _next_id() -> str:
 
 async def _run_cycle() -> None:
     """Execute one full decision cycle and update module-level state."""
-    global latest_decisions
-
     loop = asyncio.get_event_loop()
     alpha_scores = await loop.run_in_executor(None, compute_alpha_scores)
     arb_opps = await loop.run_in_executor(None, detect_arbitrage_opportunities)
+
+    latest_alpha.clear()
+    latest_alpha.extend(alpha_scores)
+    latest_arbitrage.clear()
+    latest_arbitrage.extend(arb_opps)
+
     opportunities = _build_unified_opportunities(alpha_scores, arb_opps)
 
     cycle_decisions: list[dict[str, Any]] = []
@@ -110,9 +116,10 @@ async def _run_cycle() -> None:
 
         cycle_decisions.append(decision)
 
-    # Rank by score descending
+    # Rank by score descending, then update in place so imported references stay valid
     cycle_decisions.sort(key=lambda d: d["score"], reverse=True)
-    latest_decisions = cycle_decisions
+    latest_decisions.clear()
+    latest_decisions.extend(cycle_decisions)
 
 
 async def agent_loop() -> None:
