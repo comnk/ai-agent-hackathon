@@ -1,0 +1,212 @@
+[
+  {
+    "input": {
+      "ticker": "AAPL",
+      "type": "slippage_window",
+      "confidence": 0.85,
+      "detail": "Bid-ask spread narrowing 2.1x faster than 20-tick average",
+      "risk_context": "AAPL: relax by 5%. slippage_window: only allow if confidence > 0.75."
+    },
+    "expected_output": {
+      "verdict": "allow",
+      "reason": "Confidence 0.85 exceeds slippage_window threshold of 0.75 for AAPL",
+      "confidence": 0.85
+    }
+  },
+  {
+    "input": {
+      "ticker": "TSLA",
+      "type": "slippage_window",
+      "confidence": 0.65,
+      "detail": "Spread narrowing detected but moderate signal strength",
+      "risk_context": "TSLA: apply 10% stricter confidence threshold. TSLA effective allow threshold: confidence > 0.8."
+    },
+    "expected_output": {
+      "verdict": "block",
+      "reason": "Confidence 0.65 below TSLA strict allow threshold of 0.8",
+      "confidence": 0.65
+    }
+  },
+  {
+    "input": {
+      "ticker": "NVDA",
+      "type": "arbitrage",
+      "confidence": 0.92,
+      "detail": "Cross-exchange price discrepancy detected: $0.15 spread",
+      "risk_context": "confidence > 0.7 -> ALLOW. NVDA: normal thresholds apply."
+    },
+    "expected_output": {
+      "verdict": "allow",
+      "reason": "Confidence 0.92 well above allow threshold of 0.7 for NVDA",
+      "confidence": 0.92
+    }
+  },
+  {
+    "input": {
+      "ticker": "QQQ",
+      "type": "slippage_window",
+      "confidence": 0.40,
+      "detail": "Weak spread narrowing signal on QQQ ETF",
+      "risk_context": "confidence < 0.5 -> BLOCK. QQQ: relax by 5%, effective block threshold 0.45."
+    },
+    "expected_output": {
+      "verdict": "block",
+      "reason": "Confidence 0.40 below QQQ block threshold of 0.45",
+      "confidence": 0.40
+    }
+  },
+  {
+    "input": {
+      "ticker": "TSLA",
+      "type": "arbitrage",
+      "confidence": 0.55,
+      "detail": "Minor price discrepancy detected",
+      "risk_context": "TSLA effective block threshold: confidence < 0.6. TSLA effective allow threshold: confidence > 0.8."
+    },
+    "expected_output": {
+      "verdict": "block",
+      "reason": "Confidence 0.55 below TSLA block threshold of 0.6",
+      "confidence": 0.55
+    }
+  },
+  {
+    "input": {
+      "ticker": "AAPL",
+      "type": "arbitrage",
+      "confidence": 0.68,
+      "detail": "Small cross-venue pricing gap",
+      "risk_context": "AAPL effective allow threshold: confidence > 0.65."
+    },
+    "expected_output": {
+      "verdict": "allow",
+      "reason": "Confidence 0.68 above AAPL allow threshold of 0.65",
+      "confidence": 0.68
+    }
+  },
+  {
+    "input": {
+      "ticker": "NVDA",
+      "type": "slippage_window",
+      "confidence": 0.50,
+      "detail": "Marginal spread improvement detected",
+      "risk_context": "confidence 0.5-0.7 -> FLAG for review, treat as BLOCK. slippage_window: only allow if confidence > 0.75."
+    },
+    "expected_output": {
+      "verdict": "block",
+      "reason": "Confidence 0.50 in uncertain zone and below slippage_window threshold of 0.75",
+      "confidence": 0.50
+    }
+  },
+  {
+    "input": {
+      "ticker": "TSLA",
+      "type": "slippage_window",
+      "confidence": 0.88,
+      "detail": "Strong bid-ask convergence, 3.5x faster than average",
+      "risk_context": "TSLA effective allow threshold: confidence > 0.8. slippage_window: only allow if confidence > 0.75."
+    },
+    "expected_output": {
+      "verdict": "allow",
+      "reason": "Confidence 0.88 above TSLA strict allow threshold of 0.8 and slippage threshold of 0.75",
+      "confidence": 0.88
+    }
+  },
+  {
+    "input": {
+      "ticker": "QQQ",
+      "type": "arbitrage",
+      "confidence": 0.72,
+      "detail": "ETF vs underlying basket price gap",
+      "risk_context": "QQQ effective allow threshold: confidence > 0.65."
+    },
+    "expected_output": {
+      "verdict": "allow",
+      "reason": "Confidence 0.72 above QQQ allow threshold of 0.65",
+      "confidence": 0.72
+    }
+  },
+  {
+    "input": {
+      "ticker": "NVDA",
+      "type": "arbitrage",
+      "confidence": 0.30,
+      "detail": "Weak signal, possible data lag",
+      "risk_context": "confidence < 0.5 -> BLOCK."
+    },
+    "expected_output": {
+      "verdict": "block",
+      "reason": "Confidence 0.30 well below block threshold of 0.5",
+      "confidence": 0.30
+    }
+  },
+  {
+    "input": {
+      "ticker": "AAPL",
+      "type": "slippage_window",
+      "confidence": 0.60,
+      "detail": "Moderate spread narrowing on AAPL",
+      "risk_context": "slippage_window: only allow if confidence > 0.75. AAPL: relax by 5%."
+    },
+    "expected_output": {
+      "verdict": "block",
+      "reason": "Confidence 0.60 below slippage_window threshold of 0.75 despite AAPL relaxation",
+      "confidence": 0.60
+    }
+  },
+  {
+    "input": {
+      "ticker": "TSLA",
+      "type": "arbitrage",
+      "confidence": 0.82,
+      "detail": "Strong cross-exchange discrepancy on TSLA",
+      "risk_context": "TSLA effective allow threshold: confidence > 0.8."
+    },
+    "expected_output": {
+      "verdict": "allow",
+      "reason": "Confidence 0.82 above TSLA strict allow threshold of 0.8",
+      "confidence": 0.82
+    }
+  },
+  {
+    "input": {
+      "ticker": "NVDA",
+      "type": "slippage_window",
+      "confidence": 0.78,
+      "detail": "Bid-ask spread narrowing 2.8x faster than 20-tick average",
+      "risk_context": "slippage_window: only allow if confidence > 0.75. NVDA: normal thresholds apply."
+    },
+    "expected_output": {
+      "verdict": "allow",
+      "reason": "Confidence 0.78 above slippage_window threshold of 0.75",
+      "confidence": 0.78
+    }
+  },
+  {
+    "input": {
+      "ticker": "QQQ",
+      "type": "slippage_window",
+      "confidence": 0.76,
+      "detail": "Spread narrowing detected on QQQ",
+      "risk_context": "slippage_window: only allow if confidence > 0.75. QQQ: relax by 5%."
+    },
+    "expected_output": {
+      "verdict": "allow",
+      "reason": "Confidence 0.76 above slippage_window threshold of 0.75",
+      "confidence": 0.76
+    }
+  },
+  {
+    "input": {
+      "ticker": "AAPL",
+      "type": "arbitrage",
+      "confidence": 0.0,
+      "detail": "Zero confidence — possible data error",
+      "risk_context": "Any opportunity with confidence exactly 0.0 or 1.0 -> FLAG (likely data error)."
+    },
+    "expected_output": {
+      "verdict": "block",
+      "reason": "Confidence 0.0 flagged as likely data error",
+      "confidence": 0.0
+    }
+  }
+]
