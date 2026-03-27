@@ -1,6 +1,15 @@
 "use client";
 
 import { useState, useEffect, useRef } from "react";
+import {
+  LineChart,
+  Line,
+  XAxis,
+  YAxis,
+  Tooltip,
+  ResponsiveContainer,
+  Legend,
+} from "recharts";
 
 // ─── Config ───────────────────────────────────────────────────────────────────
 const API_BASE = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
@@ -14,14 +23,13 @@ const ALL_TICKERS = [...WATCHED, ...BENCHMARKS];
 
 type AlphaScore = {
   ticker: string;
-  score: number;          // -1.0 to 1.0
+  score: number; // -1.0 to 1.0
   signal: "BUY" | "SELL" | "HOLD";
-  confidence: number;     // 0–100
-  momentum: number[];     // sparkline values
-  alpha_30d: number;      // annualised excess return vs SPY, 30-day window
-  alpha_90d: number;      // annualised excess return vs SPY, 90-day window
-  sharpe: number;         // risk-adjusted return (rf = 5%)
-  momentum_14d: number;   // 14-day rate-of-change
+  confidence: number; // 0–100
+  alpha_30d: number; // annualised excess return vs SPY, 30-day window
+  alpha_90d: number; // annualised excess return vs SPY, 90-day window
+  sharpe: number; // risk-adjusted return (rf = 5%)
+  momentum_14d: number; // 14-day rate-of-change
 };
 
 type AlphaResponse = {
@@ -63,9 +71,9 @@ type OptimizerResponse = {
 
 type RiskMetric = {
   ticker: string;
-  var_1d: number;         // Value at Risk (1-day)
-  exposure: number;       // 0–100 %
-  volatility: number;     // annualised %
+  var_1d: number; // Value at Risk (1-day)
+  exposure: number; // 0–100 %
+  volatility: number; // annualised %
   beta: number;
   alert: boolean;
 };
@@ -85,9 +93,22 @@ type FeedbackPayload = {
   comment: string;
 };
 
+type LiveQuote = {
+  ticker: string;
+  price: number;
+  bid: number;
+  ask: number;
+  volume_delta: number;
+  timestamp: string;
+};
+
+type HistoricalPrice = {
+  ticker: string;
+  date: string;
+  close: number;
+};
+
 // ─── Mock Data ────────────────────────────────────────────────────────────────
-
-
 
 function mockOptimizer(): OptimizerResponse {
   return {
@@ -152,9 +173,15 @@ function mockRisk(): RiskResponse {
 
 async function getAlpha(): Promise<AlphaResponse> {
   try {
-    const raw: Array<{ ticker: string; alpha_30d: number; alpha_90d: number; sharpe: number; momentum_14d: number }> =
-      await (await fetch(`${API_BASE}/alpha`)).json();
-    if (!Array.isArray(raw)) return { timestamp: new Date().toISOString(), scores: [] };
+    const raw: Array<{
+      ticker: string;
+      alpha_30d: number;
+      alpha_90d: number;
+      sharpe: number;
+      momentum_14d: number;
+    }> = await (await fetch(`${API_BASE}/alpha`)).json();
+    if (!Array.isArray(raw))
+      return { timestamp: new Date().toISOString(), scores: [] };
     return {
       timestamp: new Date().toISOString(),
       scores: raw.map((r) => {
@@ -163,13 +190,24 @@ async function getAlpha(): Promise<AlphaResponse> {
         const sharpe = r.sharpe ?? 0;
         const m = r.momentum_14d ?? 0;
         const score = Math.max(-1, Math.min(1, a30));
-        const signal: "BUY" | "SELL" | "HOLD" = a30 > 0.05 ? "BUY" : a30 < -0.05 ? "SELL" : "HOLD";
+        const signal: "BUY" | "SELL" | "HOLD" =
+          a30 > 0.05 ? "BUY" : a30 < -0.05 ? "SELL" : "HOLD";
         const directionAgree = Math.sign(a30) === Math.sign(a90) ? 40 : 10;
         const sharpeBoost = sharpe > 0 ? Math.min(40, sharpe * 20) : 0;
         const momentumBoost = Math.abs(m) > 0.02 ? 20 : 10;
-        const confidence = Math.round(Math.min(100, directionAgree + sharpeBoost + momentumBoost));
-        const momentum = Array.from({ length: 12 }, (_, i) => parseFloat((m * (0.5 + i / 12)).toFixed(4)));
-        return { ticker: r.ticker, score, signal, confidence, momentum, alpha_30d: a30, alpha_90d: a90, sharpe, momentum_14d: m };
+        const confidence = Math.round(
+          Math.min(100, directionAgree + sharpeBoost + momentumBoost),
+        );
+        return {
+          ticker: r.ticker,
+          score,
+          signal,
+          confidence,
+          alpha_30d: a30,
+          alpha_90d: a90,
+          sharpe,
+          momentum_14d: m,
+        };
       }),
     };
   } catch {
@@ -179,20 +217,35 @@ async function getAlpha(): Promise<AlphaResponse> {
 
 async function getDecisions(): Promise<DecisionsResponse> {
   try {
-    const raw: Array<{ id: string; ticker: string; score: number; type: string; status: string; blocked_reason: string | null; timestamp: string }> =
-      await (await fetch(`${API_BASE}/decisions`)).json();
+    const raw: Array<{
+      id: string;
+      ticker: string;
+      score: number;
+      type: string;
+      status: string;
+      blocked_reason: string | null;
+      timestamp: string;
+    }> = await (await fetch(`${API_BASE}/decisions`)).json();
     if (!Array.isArray(raw)) return { decisions: [] };
     return {
       decisions: raw.map((r) => {
-        const action: "BUY" | "SELL" | "HOLD" = r.status === "blocked" ? "HOLD" : r.score > 0 ? "BUY" : "SELL";
-        const status: "executed" | "pending" | "rejected" = r.status === "approved" ? "executed" : r.status === "blocked" ? "rejected" : "pending";
+        const action: "BUY" | "SELL" | "HOLD" =
+          r.status === "blocked" ? "HOLD" : r.score > 0 ? "BUY" : "SELL";
+        const status: "executed" | "pending" | "rejected" =
+          r.status === "approved"
+            ? "executed"
+            : r.status === "blocked"
+              ? "rejected"
+              : "pending";
         return {
           id: r.id,
           ticker: r.ticker,
           action,
           quantity: null as unknown as number,
           price: null as unknown as number,
-          rationale: r.blocked_reason ?? `${r.type} signal · score ${r.score.toFixed(3)}`,
+          rationale:
+            r.blocked_reason ??
+            `${r.type} signal · score ${r.score.toFixed(3)}`,
           timestamp: r.timestamp,
           status,
         };
@@ -200,6 +253,47 @@ async function getDecisions(): Promise<DecisionsResponse> {
     };
   } catch {
     return { decisions: [] };
+  }
+}
+
+async function getLiveQuotes(ticker?: string): Promise<LiveQuote[]> {
+  try {
+    const url = ticker
+      ? `${API_BASE}/data/quotes?ticker=${ticker}`
+      : `${API_BASE}/data/quotes`;
+    const raw: Array<Record<string, unknown>> = await (await fetch(url)).json();
+    if (!Array.isArray(raw)) return [];
+    return raw.map((r) => ({
+      ticker: String(r.ticker ?? ""),
+      price: Number(r.price ?? r.close ?? 0),
+      bid: Number(r.bid ?? 0),
+      ask: Number(r.ask ?? 0),
+      volume_delta: Number(r.volume_delta ?? r.volume ?? 0),
+      timestamp: String(r.timestamp ?? r.time ?? ""),
+    }));
+  } catch {
+    return [];
+  }
+}
+
+async function getHistoricalPrices(
+  ticker?: string,
+  days = 90,
+): Promise<HistoricalPrice[]> {
+  try {
+    const params = new URLSearchParams({ days: String(days) });
+    if (ticker) params.set("ticker", ticker);
+    const raw: Array<Record<string, unknown>> = await (
+      await fetch(`${API_BASE}/data/prices?${params}`)
+    ).json();
+    if (!Array.isArray(raw)) return [];
+    return raw.map((r) => ({
+      ticker: String(r.ticker ?? ""),
+      date: String(r.date ?? r.time ?? r.timestamp ?? "").slice(0, 10),
+      close: Number(r.close ?? 0),
+    }));
+  } catch {
+    return [];
   }
 }
 
@@ -238,7 +332,16 @@ function Badge({
   variant,
 }: {
   label: string;
-  variant: "buy" | "sell" | "hold" | "executed" | "pending" | "rejected" | "high" | "medium" | "low";
+  variant:
+    | "buy"
+    | "sell"
+    | "hold"
+    | "executed"
+    | "pending"
+    | "rejected"
+    | "high"
+    | "medium"
+    | "low";
 }) {
   const map: Record<string, string> = {
     buy: "bg-emerald-900/50 text-emerald-300 border-emerald-800",
@@ -260,41 +363,54 @@ function Badge({
   );
 }
 
-function MiniBar({ value, max = 100, color = "bg-emerald-500" }: { value: number; max?: number; color?: string }) {
+function MiniBar({
+  value,
+  max = 100,
+  color = "bg-emerald-500",
+}: {
+  value: number;
+  max?: number;
+  color?: string;
+}) {
   const pct = Math.min(100, (value / max) * 100);
   return (
     <div className="w-full bg-zinc-800 rounded-full h-1.5 overflow-hidden">
-      <div className={`h-full rounded-full transition-all duration-700 ${color}`} style={{ width: `${pct}%` }} />
+      <div
+        className={`h-full rounded-full transition-all duration-700 ${color}`}
+        style={{ width: `${pct}%` }}
+      />
     </div>
   );
 }
 
-function MiniSparkline({ values, positive }: { values: number[]; positive: boolean }) {
-  if (values.length < 2) return null;
-  const min = Math.min(...values);
-  const max = Math.max(...values);
-  const W = 48, H = 18;
-  const xs = values.map((_, i) => (i / (values.length - 1)) * W);
-  const ys = values.map((v) => H - ((v - min) / (max - min || 1)) * H);
-  const d = xs.map((x, i) => `${i === 0 ? "M" : "L"}${x.toFixed(1)},${ys[i].toFixed(1)}`).join(" ");
-  return (
-    <svg width={W} height={H} viewBox={`0 0 ${W} ${H}`} className="shrink-0 opacity-80">
-      <path d={d} fill="none" stroke={positive ? "#34d399" : "#f87171"} strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
-    </svg>
-  );
-}
 
-function PanelShell({ title, subtitle, live, children }: { title: string; subtitle?: string; live?: boolean; children: React.ReactNode }) {
+function PanelShell({
+  title,
+  subtitle,
+  live,
+  children,
+}: {
+  title: string;
+  subtitle?: string;
+  live?: boolean;
+  children: React.ReactNode;
+}) {
   return (
     <div className="rounded-2xl border border-zinc-800 bg-zinc-950 overflow-hidden flex flex-col">
       <div className="flex items-center justify-between px-4 py-3 border-b border-zinc-800/60">
         <div>
-          <h2 className="text-sm font-bold text-white tracking-wide">{title}</h2>
-          {subtitle && <p className="text-[11px] text-zinc-500 mt-0.5">{subtitle}</p>}
+          <h2 className="text-sm font-bold text-white tracking-wide">
+            {title}
+          </h2>
+          {subtitle && (
+            <p className="text-[11px] text-zinc-500 mt-0.5">{subtitle}</p>
+          )}
         </div>
         <div className="flex items-center gap-1.5">
           <PulsingDot active={!!live} />
-          <span className="text-[10px] text-zinc-500">{live ? "LIVE" : "IDLE"}</span>
+          <span className="text-[10px] text-zinc-500">
+            {live ? "LIVE" : "IDLE"}
+          </span>
         </div>
       </div>
       <div className="flex-1 overflow-auto">{children}</div>
@@ -302,10 +418,51 @@ function PanelShell({ title, subtitle, live, children }: { title: string; subtit
   );
 }
 
-// ─── Panel 1: Live Ticker Chart (Alpha Scores) ────────────────────────────────
+// ─── Panel 1: Alpha Scores + Live Quotes + Price History ─────────────────────
+
+type AlphaTab = "scores" | "live" | "history";
+
+const ALPHA_GLOSSARY = [
+  {
+    term: "Alpha (30d / 90d)",
+    formula: "annualised(ticker return) − annualised(SPY return)",
+    explain:
+      "How much the stock beat or lagged the S&P 500 benchmark. Positive = outperforming. Calculated over a 30-day and 90-day rolling window. If both windows agree in direction the signal is more reliable.",
+  },
+  {
+    term: "Sharpe ratio",
+    formula:
+      "(annualised daily return − 5% risk-free rate) ÷ annualised daily volatility",
+    explain:
+      "Risk-adjusted return. Above 1.0 is good, above 2.0 is excellent. Negative means the stock doesn't compensate for its own risk after the risk-free rate.",
+  },
+  {
+    term: "14d Momentum",
+    formula: "(close today − close 14 days ago) ÷ close 14 days ago",
+    explain:
+      "Rate-of-change over the last 14 trading days. Positive = price trending up. Used as a secondary confirmation signal alongside alpha.",
+  },
+  {
+    term: "Confidence %",
+    formula:
+      "direction agreement (40) + Sharpe boost (0–40) + momentum boost (10–20)",
+    explain:
+      "0–100 score summarising how consistent the signals are. 40 pts if 30d and 90d alpha point the same direction, up to 40 pts for positive Sharpe, up to 20 pts for strong momentum.",
+  },
+  {
+    term: "BUY / SELL / HOLD",
+    formula: "alpha_30d > +5% → BUY · < −5% → SELL · else HOLD",
+    explain:
+      "Directional signal derived from the 30-day alpha. Not a trade order — it is the agent's interpretation of whether the stock is currently outperforming or underperforming SPY.",
+  },
+];
 
 function AlphaPanel() {
+  const [tab, setTab] = useState<AlphaTab>("scores");
+  const [showGuide, setShowGuide] = useState(false);
   const [data, setData] = useState<AlphaResponse | null>(null);
+  const [quotes, setQuotes] = useState<LiveQuote[]>([]);
+  const [prices, setPrices] = useState<HistoricalPrice[]>([]);
 
   useEffect(() => {
     const tick = async () => setData(await getAlpha());
@@ -314,66 +471,365 @@ function AlphaPanel() {
     return () => clearInterval(id);
   }, []);
 
-  const sharpeColor = (v: number) => v >= 1 ? "text-emerald-400" : v >= 0 ? "text-zinc-300" : "text-red-400";
-  const sharpeLabel = (v: number) => v >= 2 ? "excellent" : v >= 1 ? "good" : v >= 0 ? "weak" : "negative";
+  useEffect(() => {
+    if (tab !== "live") return;
+    const tick = async () => setQuotes(await getLiveQuotes());
+    tick();
+    const id = setInterval(tick, 3000);
+    return () => clearInterval(id);
+  }, [tab]);
+
+  useEffect(() => {
+    if (tab !== "history") return;
+    const tick = async () => setPrices(await getHistoricalPrices());
+    tick();
+  }, [tab]);
+
+  const sharpeColor = (v: number) =>
+    v >= 1 ? "text-emerald-400" : v >= 0 ? "text-zinc-300" : "text-red-400";
+  const sharpeLabel = (v: number) =>
+    v >= 2 ? "excellent" : v >= 1 ? "good" : v >= 0 ? "weak" : "negative";
   const pct = (v: number) => `${v >= 0 ? "+" : ""}${(v * 100).toFixed(1)}%`;
 
+  // Build recharts series: one line per ticker, x-axis = date
+  const chartData = (() => {
+    const byDate = new Map<string, Record<string, number>>();
+    for (const p of prices) {
+      if (!byDate.has(p.date))
+        byDate.set(p.date, { date: p.date as unknown as number });
+      byDate.get(p.date)![p.ticker] = p.close;
+    }
+    return Array.from(byDate.values()).sort((a, b) =>
+      String(a.date) < String(b.date) ? -1 : 1,
+    );
+  })();
+  const chartTickers = [...new Set(prices.map((p) => p.ticker))];
+  const lineColors: Record<string, string> = {
+    AAPL: "#34d399",
+    TSLA: "#f87171",
+    NVDA: "#60a5fa",
+    QQQ: "#fbbf24",
+  };
+
+  const tabBtn = (t: AlphaTab, label: string) => (
+    <button
+      onClick={() => setTab(t)}
+      className={`px-3 py-1 text-[10px] font-bold uppercase tracking-widest rounded-md transition-all ${
+        tab === t
+          ? "bg-zinc-700 text-zinc-100"
+          : "text-zinc-500 hover:text-zinc-300"
+      }`}
+    >
+      {label}
+    </button>
+  );
+
   return (
-    <PanelShell title="Alpha Scores" subtitle="How much each ticker beats or lags SPY (annualised, rf = 5%)" live>
-      <div className="flex flex-col divide-y divide-zinc-800/60">
-        {(data?.scores ?? []).map((s) => {
-          const isPos = s.alpha_30d >= 0;
-          const barColor = s.signal === "BUY" ? "bg-emerald-500" : s.signal === "SELL" ? "bg-red-500" : "bg-zinc-600";
-          const trendAgree = Math.sign(s.alpha_30d) === Math.sign(s.alpha_90d);
-          return (
-            <div key={s.ticker} className="px-4 py-3">
-              {/* Row 1: ticker · signal · confidence · sparkline */}
-              <div className="flex items-center gap-2 mb-2">
-                <span className="text-xs font-mono font-bold text-zinc-100 w-10 shrink-0">{s.ticker}</span>
-                <span title={s.signal === "BUY" ? "Positive alpha — outperforming SPY" : s.signal === "SELL" ? "Negative alpha — underperforming SPY" : "Alpha near zero — no clear edge vs SPY"}>
-                  <Badge label={s.signal} variant={s.signal.toLowerCase() as "buy" | "sell" | "hold"} />
+    <PanelShell
+      title="Alpha Scores"
+      subtitle="How much each ticker beats or lags SPY (annualised, rf = 5%)"
+      live
+    >
+      {/* Tab bar */}
+      <div className="flex items-center gap-1 px-3 py-2 border-b border-zinc-800/60">
+        {tabBtn("scores", "Alpha")}
+        {tabBtn("live", "Live Quotes")}
+        {tabBtn("history", "Price History")}
+        <button
+          onClick={() => setShowGuide((v) => !v)}
+          className={`ml-auto px-2 py-1 text-[10px] font-bold rounded-md border transition-all ${
+            showGuide
+              ? "border-zinc-600 text-zinc-200 bg-zinc-800"
+              : "border-zinc-700 text-zinc-500 hover:text-zinc-300"
+          }`}
+          title="How to read this panel"
+        >
+          ? How to read
+        </button>
+      </div>
+
+      {/* ── Glossary guide ── */}
+      {showGuide && (
+        <div className="border-b border-zinc-800/60 bg-zinc-900/60 px-4 py-3 flex flex-col gap-3">
+          <p className="text-[10px] text-zinc-400 font-semibold uppercase tracking-widest">
+            How numbers are calculated
+          </p>
+          {ALPHA_GLOSSARY.map((g) => (
+            <div key={g.term}>
+              <div className="flex items-baseline gap-2 flex-wrap mb-0.5">
+                <span className="text-[11px] font-bold text-zinc-200">
+                  {g.term}
                 </span>
-                <span className="text-[10px] text-zinc-500 ml-auto" title="Confidence: based on 30d/90d alpha direction agreement + positive Sharpe + momentum. Higher = more consistent signal.">
-                  {s.confidence}% conf
-                </span>
-                <span title="14-day price momentum sparkline">
-                  <MiniSparkline values={s.momentum} positive={isPos} />
-                </span>
-              </div>
-              {/* Row 2: alpha vs SPY bar */}
-              <div className="flex items-center gap-2 mb-1.5" title={`30-day alpha: ${s.ticker} returned ${pct(s.alpha_30d)} more/less than SPY annualised over 30 days`}>
-                <span className="text-[10px] text-zinc-600 w-16 shrink-0">vs SPY 30d</span>
-                <MiniBar value={Math.abs(s.alpha_30d) * 100} max={50} color={barColor} />
-                <span className={`text-[10px] font-mono font-bold w-14 text-right shrink-0 ${isPos ? "text-emerald-400" : "text-red-400"}`}>
-                  {pct(s.alpha_30d)}
-                </span>
-              </div>
-              {/* Row 3: stats grid */}
-              <div className="grid grid-cols-3 gap-x-2 text-[10px] font-mono">
-                <span className="text-zinc-500" title="90-day alpha vs SPY. If 30d and 90d agree in direction, the signal is more reliable.">
-                  90d alpha <span className={s.alpha_90d >= 0 ? "text-emerald-400" : "text-red-400"}>{pct(s.alpha_90d)}</span>
-                </span>
-                <span className="text-zinc-500" title={`Sharpe = (annualised return − 5% rf) ÷ volatility. Above 1.0 is good. This is ${sharpeLabel(s.sharpe)}.`}>
-                  Sharpe <span className={sharpeColor(s.sharpe)}>{s.sharpe.toFixed(2)}</span>
-                </span>
-                <span className="text-zinc-500" title={`Price changed ${pct(s.momentum_14d)} over the last 14 trading days. Positive = upward trend.`}>
-                  14d mom <span className={s.momentum_14d >= 0 ? "text-emerald-400" : "text-red-400"}>{pct(s.momentum_14d)}</span>
+                <span className="text-[10px] font-mono text-zinc-500">
+                  {g.formula}
                 </span>
               </div>
-              {!trendAgree && (
-                <div className="mt-1.5 text-[10px] text-amber-500" title="30d and 90d alpha point in opposite directions — short-term trend may be reversing.">
-                  ⚠ mixed signal — 30d and 90d alpha disagree
-                </div>
-              )}
+              <p className="text-[11px] text-zinc-400 leading-relaxed">
+                {g.explain}
+              </p>
             </div>
-          );
-        })}
-      </div>
-      <div className="px-4 pb-2 border-t border-zinc-800/60 pt-2">
-        <p className="text-[10px] text-zinc-600">
-          Updated {data ? new Date(data.timestamp).toLocaleTimeString() : "—"} · polling 2s · alpha = annualised ticker return − SPY return
-        </p>
-      </div>
+          ))}
+        </div>
+      )}
+
+      {/* ── Tab: Alpha Scores ── */}
+      {tab === "scores" && (
+        <>
+          <div className="flex flex-col divide-y divide-zinc-800/60">
+            {(data?.scores ?? []).map((s) => {
+              const isPos = s.alpha_30d >= 0;
+              const barColor =
+                s.signal === "BUY"
+                  ? "bg-emerald-500"
+                  : s.signal === "SELL"
+                    ? "bg-red-500"
+                    : "bg-zinc-600";
+              const trendAgree =
+                Math.sign(s.alpha_30d) === Math.sign(s.alpha_90d);
+              return (
+                <div key={s.ticker} className="px-4 py-3">
+                  <div className="flex items-center gap-2 mb-2">
+                    <span className="text-xs font-mono font-bold text-zinc-100 w-10 shrink-0">
+                      {s.ticker}
+                    </span>
+                    <span
+                      title={
+                        s.signal === "BUY"
+                          ? "Positive alpha — outperforming SPY"
+                          : s.signal === "SELL"
+                            ? "Negative alpha — underperforming SPY"
+                            : "Alpha near zero — no clear edge vs SPY"
+                      }
+                    >
+                      <Badge
+                        label={s.signal}
+                        variant={
+                          s.signal.toLowerCase() as "buy" | "sell" | "hold"
+                        }
+                      />
+                    </span>
+                    <span
+                      className="text-[10px] text-zinc-500 ml-auto"
+                      title="Confidence: based on 30d/90d alpha direction agreement + positive Sharpe + momentum. Higher = more consistent signal."
+                    >
+                      {s.confidence}% conf
+                    </span>
+                  </div>
+                  <div
+                    className="flex items-center gap-2 mb-1.5"
+                    title={`30-day alpha: ${s.ticker} returned ${pct(s.alpha_30d)} more/less than SPY annualised over 30 days`}
+                  >
+                    <span className="text-[10px] text-zinc-600 w-16 shrink-0">
+                      vs SPY 30d
+                    </span>
+                    <MiniBar
+                      value={Math.abs(s.alpha_30d) * 100}
+                      max={50}
+                      color={barColor}
+                    />
+                    <span
+                      className={`text-[10px] font-mono font-bold w-14 text-right shrink-0 ${isPos ? "text-emerald-400" : "text-red-400"}`}
+                    >
+                      {pct(s.alpha_30d)}
+                    </span>
+                  </div>
+                  <div className="grid grid-cols-3 gap-x-2 text-[10px] font-mono">
+                    <span
+                      className="text-zinc-500"
+                      title="90-day alpha vs SPY. If 30d and 90d agree in direction, the signal is more reliable."
+                    >
+                      90d alpha{" "}
+                      <span
+                        className={
+                          s.alpha_90d >= 0 ? "text-emerald-400" : "text-red-400"
+                        }
+                      >
+                        {pct(s.alpha_90d)}
+                      </span>
+                    </span>
+                    <span
+                      className="text-zinc-500"
+                      title={`Sharpe = (annualised return − 5% rf) ÷ volatility. Above 1.0 is good. This is ${sharpeLabel(s.sharpe)}.`}
+                    >
+                      Sharpe{" "}
+                      <span className={sharpeColor(s.sharpe)}>
+                        {s.sharpe.toFixed(2)}
+                      </span>
+                    </span>
+                    <span
+                      className="text-zinc-500"
+                      title={`Price changed ${pct(s.momentum_14d)} over the last 14 trading days. Positive = upward trend.`}
+                    >
+                      14d mom{" "}
+                      <span
+                        className={
+                          s.momentum_14d >= 0
+                            ? "text-emerald-400"
+                            : "text-red-400"
+                        }
+                      >
+                        {pct(s.momentum_14d)}
+                      </span>
+                    </span>
+                  </div>
+                  {!trendAgree && (
+                    <div
+                      className="mt-1.5 text-[10px] text-amber-500"
+                      title="30d and 90d alpha point in opposite directions — short-term trend may be reversing."
+                    >
+                      ⚠ mixed signal — 30d and 90d alpha disagree
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+          <div className="px-4 pb-2 border-t border-zinc-800/60 pt-2">
+            <p className="text-[10px] text-zinc-600">
+              Updated{" "}
+              {data ? new Date(data.timestamp).toLocaleTimeString() : "—"} ·
+              polling 2s · alpha = annualised ticker return − SPY return
+            </p>
+          </div>
+        </>
+      )}
+
+      {/* ── Tab: Live Quotes ── */}
+      {tab === "live" && (
+        <div className="p-3">
+          {quotes.length === 0 ? (
+            <p className="text-[11px] text-zinc-600 text-center py-6">
+              No live quotes — waiting for data…
+            </p>
+          ) : (
+            <table className="w-full text-[11px] font-mono">
+              <thead>
+                <tr className="text-zinc-600 text-[10px] uppercase tracking-widest">
+                  <th className="text-left pb-2">Ticker</th>
+                  <th className="text-right pb-2" title="Latest trade price">
+                    Price
+                  </th>
+                  <th
+                    className="text-right pb-2"
+                    title="Best bid (highest buy offer)"
+                  >
+                    Bid
+                  </th>
+                  <th
+                    className="text-right pb-2"
+                    title="Best ask (lowest sell offer)"
+                  >
+                    Ask
+                  </th>
+                  <th
+                    className="text-right pb-2"
+                    title="Ask − Bid spread in dollars"
+                  >
+                    Spread
+                  </th>
+                  <th
+                    className="text-right pb-2"
+                    title="Volume delta: buy volume minus sell volume"
+                  >
+                    Vol Δ
+                  </th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-zinc-800/40">
+                {quotes.map((q) => {
+                  const spread = q.ask - q.bid;
+                  return (
+                    <tr key={q.ticker} className="text-zinc-300">
+                      <td className="py-1.5 font-bold text-zinc-100">
+                        {q.ticker}
+                      </td>
+                      <td className="text-right">${q.price.toFixed(2)}</td>
+                      <td className="text-right text-emerald-400">
+                        ${q.bid.toFixed(2)}
+                      </td>
+                      <td className="text-right text-red-400">
+                        ${q.ask.toFixed(2)}
+                      </td>
+                      <td className="text-right text-zinc-500">
+                        {spread > 0 ? `$${spread.toFixed(3)}` : "—"}
+                      </td>
+                      <td
+                        className={`text-right ${q.volume_delta >= 0 ? "text-emerald-400" : "text-red-400"}`}
+                      >
+                        {q.volume_delta >= 0 ? "+" : ""}
+                        {q.volume_delta.toLocaleString()}
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          )}
+          <p className="text-[10px] text-zinc-600 mt-3">
+            Polling every 3s · bid/ask from DB
+          </p>
+        </div>
+      )}
+
+      {/* ── Tab: Price History ── */}
+      {tab === "history" && (
+        <div className="p-3">
+          {chartData.length === 0 ? (
+            <p className="text-[11px] text-zinc-600 text-center py-6">
+              No historical prices — waiting for data…
+            </p>
+          ) : (
+            <>
+              <ResponsiveContainer width="100%" height={200}>
+                <LineChart
+                  data={chartData}
+                  margin={{ top: 4, right: 8, left: 0, bottom: 0 }}
+                >
+                  <XAxis
+                    dataKey="date"
+                    tick={{ fill: "#52525b", fontSize: 9 }}
+                    tickLine={false}
+                    axisLine={false}
+                    tickFormatter={(v: string) => v.slice(5)}
+                    interval="preserveStartEnd"
+                  />
+                  <YAxis
+                    tick={{ fill: "#52525b", fontSize: 9 }}
+                    tickLine={false}
+                    axisLine={false}
+                    tickFormatter={(v: number) => `$${v}`}
+                    width={42}
+                  />
+                  <Tooltip
+                    contentStyle={{
+                      background: "#18181b",
+                      border: "1px solid #3f3f46",
+                      borderRadius: 6,
+                      fontSize: 11,
+                    }}
+                    labelStyle={{ color: "#a1a1aa" }}
+                    formatter={(v: unknown) => [`$${Number(v).toFixed(2)}`, ""]}
+                  />
+                  <Legend wrapperStyle={{ fontSize: 10, color: "#71717a" }} />
+                  {chartTickers.map((t) => (
+                    <Line
+                      key={t}
+                      type="monotone"
+                      dataKey={t}
+                      stroke={lineColors[t] ?? "#94a3b8"}
+                      dot={false}
+                      strokeWidth={1.5}
+                    />
+                  ))}
+                </LineChart>
+              </ResponsiveContainer>
+              <p className="text-[10px] text-zinc-600 mt-2">
+                90-day close prices · source: Vincent&apos;s DB
+              </p>
+            </>
+          )}
+        </div>
+      )}
     </PanelShell>
   );
 }
@@ -403,33 +859,74 @@ function DecisionLog() {
   }, []);
 
   return (
-    <PanelShell title="Decision Log" subtitle="Scored opportunities after Senso risk gate · updated every 5s" live>
+    <PanelShell
+      title="Decision Log"
+      subtitle="Scored opportunities after Senso risk gate · updated every 5s"
+      live
+    >
       <div className="flex flex-col divide-y divide-zinc-800/60">
         {(data?.decisions ?? []).map((dec) => (
-          <div key={dec.id} className={`px-4 py-3 transition-colors duration-700 ${flash === dec.id ? "bg-emerald-950/40" : ""}`}>
+          <div
+            key={dec.id}
+            className={`px-4 py-3 transition-colors duration-700 ${flash === dec.id ? "bg-emerald-950/40" : ""}`}
+          >
             <div className="flex items-center gap-2 mb-1.5">
-              <span className="text-xs font-mono font-bold text-zinc-100">{dec.ticker}</span>
-              <span title={dec.action === "BUY" ? "Positive alpha — agent recommends entering a long position" : dec.action === "SELL" ? "Negative alpha — agent recommends avoiding or exiting" : "Signal below threshold — no action taken"}>
-                <Badge label={dec.action} variant={dec.action.toLowerCase() as "buy" | "sell" | "hold"} />
+              <span className="text-xs font-mono font-bold text-zinc-100">
+                {dec.ticker}
               </span>
-              <span title={dec.status === "executed" ? "Approved — passed all Senso risk checks" : dec.status === "rejected" ? "Blocked — failed Senso risk gate (score too low or risk limits exceeded)" : "Pending — awaiting risk gate evaluation"}>
+              <span
+                title={
+                  dec.action === "BUY"
+                    ? "Positive alpha — agent recommends entering a long position"
+                    : dec.action === "SELL"
+                      ? "Negative alpha — agent recommends avoiding or exiting"
+                      : "Signal below threshold — no action taken"
+                }
+              >
+                <Badge
+                  label={dec.action}
+                  variant={dec.action.toLowerCase() as "buy" | "sell" | "hold"}
+                />
+              </span>
+              <span
+                title={
+                  dec.status === "executed"
+                    ? "Approved — passed all Senso risk checks"
+                    : dec.status === "rejected"
+                      ? "Blocked — failed Senso risk gate (score too low or risk limits exceeded)"
+                      : "Pending — awaiting risk gate evaluation"
+                }
+              >
                 <Badge label={dec.status} variant={dec.status} />
               </span>
-              <span className="ml-auto text-[10px] text-zinc-500 font-mono" title="Time this decision was generated by the agent loop">
+              <span
+                className="ml-auto text-[10px] text-zinc-500 font-mono"
+                title="Time this decision was generated by the agent loop"
+              >
                 {new Date(dec.timestamp).toLocaleTimeString()}
               </span>
             </div>
             <div className="flex items-center gap-2 mb-1 text-[10px] font-mono text-zinc-600">
               <span title="Unique decision ID">{dec.id}</span>
             </div>
-            <p className="text-[11px] text-zinc-400 leading-relaxed" title={dec.status === "rejected" ? "Reason blocked by Senso risk gate" : "Signal type and score that triggered this decision"}>
+            <p
+              className="text-[11px] text-zinc-400 leading-relaxed"
+              title={
+                dec.status === "rejected"
+                  ? "Reason blocked by Senso risk gate"
+                  : "Signal type and score that triggered this decision"
+              }
+            >
               {dec.rationale}
             </p>
           </div>
         ))}
       </div>
       <div className="px-4 pb-2 border-t border-zinc-800/60 pt-2">
-        <p className="text-[10px] text-zinc-600">Score = 40% alpha signal + 60% arb confidence · Senso gates each decision · polling 3s</p>
+        <p className="text-[10px] text-zinc-600">
+          Score = 40% alpha signal + 60% arb confidence · Senso gates each
+          decision · polling 3s
+        </p>
       </div>
     </PanelShell>
   );
@@ -450,40 +947,69 @@ function OptimizerPanel() {
   }, []);
 
   return (
-    <PanelShell title="Overmind Learning" subtitle="Optimizer epoch & parameter suggestions" live>
+    <PanelShell
+      title="Overmind Learning"
+      subtitle="Optimizer epoch & parameter suggestions"
+      live
+    >
       {data && (
         <>
           {/* Stats bar */}
           <div className="grid grid-cols-3 divide-x divide-zinc-800 border-b border-zinc-800/60">
             {[
-              { label: "Sharpe", value: data.sharpe.toFixed(3), color: "text-emerald-400" },
-              { label: "Win Rate", value: `${data.win_rate.toFixed(1)}%`, color: "text-sky-400" },
-              { label: "Avg Ret", value: `${data.avg_return.toFixed(2)}%`, color: "text-amber-400" },
+              {
+                label: "Sharpe",
+                value: data.sharpe.toFixed(3),
+                color: "text-emerald-400",
+              },
+              {
+                label: "Win Rate",
+                value: `${data.win_rate.toFixed(1)}%`,
+                color: "text-sky-400",
+              },
+              {
+                label: "Avg Ret",
+                value: `${data.avg_return.toFixed(2)}%`,
+                color: "text-amber-400",
+              },
             ].map((s) => (
               <div key={s.label} className="flex flex-col items-center py-3">
-                <span className={`text-lg font-mono font-bold ${s.color}`}>{s.value}</span>
-                <span className="text-[10px] text-zinc-500 uppercase tracking-widest mt-0.5">{s.label}</span>
+                <span className={`text-lg font-mono font-bold ${s.color}`}>
+                  {s.value}
+                </span>
+                <span className="text-[10px] text-zinc-500 uppercase tracking-widest mt-0.5">
+                  {s.label}
+                </span>
               </div>
             ))}
           </div>
           {/* Epoch */}
           <div className="px-4 py-2 flex items-center justify-between border-b border-zinc-800/60">
             <span className="text-[11px] text-zinc-500">Epoch</span>
-            <span className="text-sm font-mono text-white">{data.epoch.toLocaleString()}</span>
+            <span className="text-sm font-mono text-white">
+              {data.epoch.toLocaleString()}
+            </span>
           </div>
           {/* Insights */}
           <div className="flex flex-col divide-y divide-zinc-800/60">
             {data.insights.map((ins) => (
-              <div key={ins.param} className="flex items-center gap-3 px-4 py-2.5">
+              <div
+                key={ins.param}
+                className="flex items-center gap-3 px-4 py-2.5"
+              >
                 <div className="flex-1">
                   <div className="flex items-center gap-2 mb-0.5">
-                    <span className="text-xs font-mono text-zinc-300">{ins.param}</span>
+                    <span className="text-xs font-mono text-zinc-300">
+                      {ins.param}
+                    </span>
                     <Badge label={ins.impact} variant={ins.impact} />
                   </div>
                   <div className="flex items-center gap-2 text-[11px] font-mono">
                     <span className="text-zinc-500">{ins.current}</span>
                     <span className="text-zinc-600">→</span>
-                    <span className="text-emerald-400 font-bold">{ins.suggested}</span>
+                    <span className="text-emerald-400 font-bold">
+                      {ins.suggested}
+                    </span>
                     <span className="text-amber-400">({ins.delta})</span>
                   </div>
                 </div>
@@ -492,7 +1018,8 @@ function OptimizerPanel() {
           </div>
           <div className="px-4 pb-3">
             <p className="text-[10px] text-zinc-600">
-              Last updated {new Date(data.last_updated).toLocaleTimeString()} · polling 5s
+              Last updated {new Date(data.last_updated).toLocaleTimeString()} ·
+              polling 5s
             </p>
           </div>
         </>
@@ -520,14 +1047,26 @@ function RiskPanel() {
   };
 
   return (
-    <PanelShell title="Senso Risk" subtitle="Portfolio risk exposure & alerts" live={!!data}>
+    <PanelShell
+      title="Senso Risk"
+      subtitle="Portfolio risk exposure & alerts"
+      live={!!data}
+    >
       {data && (
         <>
           {/* Portfolio summary */}
           <div className="grid grid-cols-3 divide-x divide-zinc-800 border-b border-zinc-800/60">
             {[
-              { label: "Portfolio VaR", value: `${data.portfolio_var.toFixed(2)}%`, color: "text-red-400" },
-              { label: "Max Drawdown", value: `${data.max_drawdown.toFixed(2)}%`, color: "text-orange-400" },
+              {
+                label: "Portfolio VaR",
+                value: `${data.portfolio_var.toFixed(2)}%`,
+                color: "text-red-400",
+              },
+              {
+                label: "Max Drawdown",
+                value: `${data.max_drawdown.toFixed(2)}%`,
+                color: "text-orange-400",
+              },
               {
                 label: "Corr Risk",
                 value: data.correlation_risk.toUpperCase(),
@@ -535,8 +1074,12 @@ function RiskPanel() {
               },
             ].map((s) => (
               <div key={s.label} className="flex flex-col items-center py-3">
-                <span className={`text-base font-mono font-bold ${s.color}`}>{s.value}</span>
-                <span className="text-[10px] text-zinc-500 uppercase tracking-widest mt-0.5">{s.label}</span>
+                <span className={`text-base font-mono font-bold ${s.color}`}>
+                  {s.value}
+                </span>
+                <span className="text-[10px] text-zinc-500 uppercase tracking-widest mt-0.5">
+                  {s.label}
+                </span>
               </div>
             ))}
           </div>
@@ -550,7 +1093,9 @@ function RiskPanel() {
                       ⚠ ALERT
                     </span>
                   )}
-                  <span className="text-xs font-mono font-bold text-zinc-200">{m.ticker}</span>
+                  <span className="text-xs font-mono font-bold text-zinc-200">
+                    {m.ticker}
+                  </span>
                   <span className="text-[10px] text-zinc-500 ml-auto">
                     β {m.beta.toFixed(2)} · vol {m.volatility.toFixed(1)}%
                   </span>
@@ -562,9 +1107,17 @@ function RiskPanel() {
                   <MiniBar
                     value={m.exposure}
                     max={40}
-                    color={m.alert ? "bg-red-500" : m.exposure > 20 ? "bg-amber-500" : "bg-emerald-500"}
+                    color={
+                      m.alert
+                        ? "bg-red-500"
+                        : m.exposure > 20
+                          ? "bg-amber-500"
+                          : "bg-emerald-500"
+                    }
                   />
-                  <span className="text-[10px] text-zinc-500 shrink-0">VaR {m.var_1d.toFixed(2)}%</span>
+                  <span className="text-[10px] text-zinc-500 shrink-0">
+                    VaR {m.var_1d.toFixed(2)}%
+                  </span>
                 </div>
               </div>
             ))}
@@ -587,7 +1140,9 @@ function FeedbackPanel() {
   const [decisionId, setDecisionId] = useState("");
   const [rating, setRating] = useState<1 | 2 | 3 | 4 | 5>(3);
   const [comment, setComment] = useState("");
-  const [status, setStatus] = useState<"idle" | "sending" | "sent" | "error">("idle");
+  const [status, setStatus] = useState<"idle" | "sending" | "sent" | "error">(
+    "idle",
+  );
 
   const handleSubmit = async () => {
     if (!decisionId.trim()) return;
@@ -607,11 +1162,16 @@ function FeedbackPanel() {
   const stars = [1, 2, 3, 4, 5] as const;
 
   return (
-    <PanelShell title="Trader Feedback" subtitle="Rate and annotate agent decisions">
+    <PanelShell
+      title="Trader Feedback"
+      subtitle="Rate and annotate agent decisions"
+    >
       <div className="p-4 flex flex-col gap-4">
         {/* Ticker select */}
         <div>
-          <label className="text-[11px] text-zinc-500 uppercase tracking-widest block mb-1.5">Ticker</label>
+          <label className="text-[11px] text-zinc-500 uppercase tracking-widest block mb-1.5">
+            Ticker
+          </label>
           <div className="flex gap-1.5 flex-wrap">
             {ALL_TICKERS.map((t) => (
               <button
@@ -631,7 +1191,9 @@ function FeedbackPanel() {
 
         {/* Decision ID */}
         <div>
-          <label className="text-[11px] text-zinc-500 uppercase tracking-widest block mb-1.5">Decision ID</label>
+          <label className="text-[11px] text-zinc-500 uppercase tracking-widest block mb-1.5">
+            Decision ID
+          </label>
           <input
             type="text"
             value={decisionId}
@@ -643,26 +1205,34 @@ function FeedbackPanel() {
 
         {/* Star rating */}
         <div>
-          <label className="text-[11px] text-zinc-500 uppercase tracking-widest block mb-1.5">Rating</label>
+          <label className="text-[11px] text-zinc-500 uppercase tracking-widest block mb-1.5">
+            Rating
+          </label>
           <div className="flex gap-2">
             {stars.map((s) => (
               <button
                 key={s}
                 onClick={() => setRating(s)}
                 className={`text-xl transition-all ${
-                  s <= rating ? "text-amber-400 scale-110" : "text-zinc-700 hover:text-zinc-500"
+                  s <= rating
+                    ? "text-amber-400 scale-110"
+                    : "text-zinc-700 hover:text-zinc-500"
                 }`}
               >
                 ★
               </button>
             ))}
-            <span className="text-xs text-zinc-500 self-center ml-1">{rating}/5</span>
+            <span className="text-xs text-zinc-500 self-center ml-1">
+              {rating}/5
+            </span>
           </div>
         </div>
 
         {/* Comment */}
         <div>
-          <label className="text-[11px] text-zinc-500 uppercase tracking-widest block mb-1.5">Comment</label>
+          <label className="text-[11px] text-zinc-500 uppercase tracking-widest block mb-1.5">
+            Comment
+          </label>
           <textarea
             value={comment}
             onChange={(e) => setComment(e.target.value)}
@@ -680,19 +1250,19 @@ function FeedbackPanel() {
             status === "sent"
               ? "bg-emerald-600 text-white"
               : status === "error"
-              ? "bg-red-700 text-white"
-              : status === "sending"
-              ? "bg-zinc-700 text-zinc-400 cursor-wait"
-              : "bg-white text-black hover:bg-zinc-200 disabled:bg-zinc-800 disabled:text-zinc-600 disabled:cursor-not-allowed"
+                ? "bg-red-700 text-white"
+                : status === "sending"
+                  ? "bg-zinc-700 text-zinc-400 cursor-wait"
+                  : "bg-white text-black hover:bg-zinc-200 disabled:bg-zinc-800 disabled:text-zinc-600 disabled:cursor-not-allowed"
           }`}
         >
           {status === "sending"
             ? "Submitting…"
             : status === "sent"
-            ? "✓ Feedback sent"
-            : status === "error"
-            ? "✗ Error — retry"
-            : "Submit Feedback"}
+              ? "✓ Feedback sent"
+              : status === "error"
+                ? "✗ Error — retry"
+                : "Submit Feedback"}
         </button>
       </div>
     </PanelShell>
@@ -708,9 +1278,12 @@ export default function AgentDashboard() {
       <div className="max-w-7xl mx-auto mb-6">
         <div className="flex items-center gap-3">
           <div>
-            <h1 className="text-lg font-bold text-white tracking-tight">Overmind Agent Console</h1>
+            <h1 className="text-lg font-bold text-white tracking-tight">
+              Overmind Agent Console
+            </h1>
             <p className="text-[11px] text-zinc-500 mt-0.5">
-              Tickers: {WATCHED.join(", ")} · Benchmarks: {BENCHMARKS.join(", ")}
+              Tickers: {WATCHED.join(", ")} · Benchmarks:{" "}
+              {BENCHMARKS.join(", ")}
             </p>
           </div>
           <div className="ml-auto flex items-center gap-1.5">
