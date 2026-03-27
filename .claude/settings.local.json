@@ -1,9 +1,0 @@
-{
-  "permissions": {
-    "allow": [
-      "Bash(xxd /Users/vibhusingh/ai-agent-hackathon/backend/requirements.txt)",
-      "Bash(iconv -f UTF-16 -t UTF-8 /Users/vibhusingh/ai-agent-hackathon/backend/requirements.txt)",
-      "Bash(python3 -c \"import json; data=json.load\\(open\\(''data/test_cases.json''\\)\\); print\\(f''{len\\(data\\)} test cases, all valid JSON''\\)\")"
-    ]
-  }
-}

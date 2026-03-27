@@ -1,3 +1,4 @@
 .kiro
 *.pyc
 .hypothesis
+.claude/
