@@ -41,11 +41,14 @@ type Decision = {
   id: string;
   ticker: string;
   action: "BUY" | "SELL" | "HOLD";
-  quantity: number;
-  price: number;
-  rationale: string;
-  timestamp: string;
   status: "executed" | "pending" | "rejected";
+  signalType: string;       // alpha | slippage_window | price_divergence | hft_window
+  score: number;            // composite 0–1
+  alphaSignal: number;      // normalised alpha contribution 0–1
+  arbConfidence: number;    // arbitrage confidence 0–1
+  detail: string;           // human-readable reason from the signal detector
+  blockedReason: string | null;
+  timestamp: string;
 };
 
 type DecisionsResponse = {
@@ -222,6 +225,9 @@ async function getDecisions(): Promise<DecisionsResponse> {
       ticker: string;
       score: number;
       type: string;
+      alpha_signal: number;
+      arb_confidence: number;
+      detail: string;
       status: string;
       blocked_reason: string | null;
       timestamp: string;
@@ -232,22 +238,19 @@ async function getDecisions(): Promise<DecisionsResponse> {
         const action: "BUY" | "SELL" | "HOLD" =
           r.status === "blocked" ? "HOLD" : r.score > 0 ? "BUY" : "SELL";
         const status: "executed" | "pending" | "rejected" =
-          r.status === "approved"
-            ? "executed"
-            : r.status === "blocked"
-              ? "rejected"
-              : "pending";
+          r.status === "approved" ? "executed" : r.status === "blocked" ? "rejected" : "pending";
         return {
           id: r.id,
           ticker: r.ticker,
           action,
-          quantity: null as unknown as number,
-          price: null as unknown as number,
-          rationale:
-            r.blocked_reason ??
-            `${r.type} signal · score ${r.score.toFixed(3)}`,
-          timestamp: r.timestamp,
           status,
+          signalType: r.type ?? "unknown",
+          score: r.score ?? 0,
+          alphaSignal: r.alpha_signal ?? 0,
+          arbConfidence: r.arb_confidence ?? 0,
+          detail: r.detail ?? "",
+          blockedReason: r.blocked_reason ?? null,
+          timestamp: r.timestamp,
         };
       }),
     };
@@ -836,11 +839,73 @@ function AlphaPanel() {
   );
 }
 
+const SIGNAL_TYPE_LABELS: Record<string, { label: string; explain: string }> = {
+  alpha: {
+    label: "Alpha",
+    explain:
+      "Based on annualised outperformance vs SPY. BUY = ticker beating the market; SELL = lagging.",
+  },
+  slippage_window: {
+    label: "Slippage Window",
+    explain:
+      "The bid-ask spread narrowed to less than 66% of its 20-tick rolling average — a low-friction window to enter or exit cheaply.",
+  },
+  price_divergence: {
+    label: "Price Divergence",
+    explain:
+      "Two correlated tickers (e.g. AAPL/QQQ) have drifted apart by more than 2 standard deviations — mean-reversion arbitrage opportunity.",
+  },
+  hft_window: {
+    label: "HFT Window",
+    explain:
+      "Volume delta spiked >2σ above average AND spread compressed >10% simultaneously — short-lived high-frequency trading window.",
+  },
+};
+
+const DECISION_GLOSSARY = [
+  {
+    term: "BUY / SELL / HOLD",
+    explain:
+      "BUY = positive alpha or approved arbitrage opportunity. SELL = negative alpha (underperforming SPY). HOLD = signal was blocked by the Senso risk gate and no action is taken.",
+  },
+  {
+    term: "Executed",
+    explain:
+      "The decision passed all Senso risk checks (score ≥ 0.3 and random risk gate). In a live system this would trigger a trade order. Here it means the agent approved the opportunity.",
+  },
+  {
+    term: "Rejected",
+    explain:
+      "Senso blocked the decision — either the score was below 0.3 or the probabilistic risk gate fired. No trade is taken.",
+  },
+  {
+    term: "Score",
+    explain:
+      "Composite signal strength: 40% × alpha signal + 60% × arbitrage confidence. Range 0–1. Higher = stronger combined signal.",
+  },
+  {
+    term: "Alpha signal",
+    explain:
+      "Normalised 30-day alpha contribution (0–1). 0 means the alpha was zero or negative; 1 means it was the strongest alpha in the current batch.",
+  },
+  {
+    term: "Arb confidence",
+    explain:
+      "How strong the arbitrage pattern is (0–1). For spread narrowing: how far below the rolling average. For z-score divergence: how many σ above 2.0.",
+  },
+  {
+    term: "Signal detail",
+    explain:
+      "The exact numbers from the signal detector — spread values, z-scores, volume spikes — so you can verify the raw reason behind each decision.",
+  },
+];
+
 // ─── Panel 2: Decision Log Feed ───────────────────────────────────────────────
 
 function DecisionLog() {
   const [data, setData] = useState<DecisionsResponse | null>(null);
   const [flash, setFlash] = useState<string | null>(null);
+  const [showGuide, setShowGuide] = useState(false);
   const prevIds = useRef<Set<string>>(new Set());
 
   useEffect(() => {
@@ -867,68 +932,101 @@ function DecisionLog() {
       maxHeight="560px"
       live
     >
-      <div className="flex flex-col divide-y divide-zinc-800/60">
-        {(data?.decisions ?? []).map((dec) => (
-          <div
-            key={dec.id}
-            className={`px-4 py-3 transition-colors duration-700 ${flash === dec.id ? "bg-emerald-950/40" : ""}`}
-          >
-            <div className="flex items-center gap-2 mb-1.5">
-              <span className="text-xs font-mono font-bold text-zinc-100">
-                {dec.ticker}
-              </span>
-              <span
-                title={
-                  dec.action === "BUY"
-                    ? "Positive alpha — agent recommends entering a long position"
-                    : dec.action === "SELL"
-                      ? "Negative alpha — agent recommends avoiding or exiting"
-                      : "Signal below threshold — no action taken"
-                }
-              >
-                <Badge
-                  label={dec.action}
-                  variant={dec.action.toLowerCase() as "buy" | "sell" | "hold"}
-                />
-              </span>
-              <span
-                title={
-                  dec.status === "executed"
-                    ? "Approved — passed all Senso risk checks"
-                    : dec.status === "rejected"
-                      ? "Blocked — failed Senso risk gate (score too low or risk limits exceeded)"
-                      : "Pending — awaiting risk gate evaluation"
-                }
-              >
-                <Badge label={dec.status} variant={dec.status} />
-              </span>
-              <span
-                className="ml-auto text-[10px] text-zinc-500 font-mono"
-                title="Time this decision was generated by the agent loop"
-              >
-                {new Date(dec.timestamp).toLocaleTimeString()}
-              </span>
-            </div>
-            <div className="flex items-center gap-2 mb-1 text-[10px] font-mono text-zinc-600">
-              <span title="Unique decision ID">{dec.id}</span>
-            </div>
-            <p
-              className="text-[11px] text-zinc-400 leading-relaxed"
-              title={
-                dec.status === "rejected"
-                  ? "Reason blocked by Senso risk gate"
-                  : "Signal type and score that triggered this decision"
-              }
-            >
-              {dec.rationale}
-            </p>
-          </div>
-        ))}
+      {/* How-to-read toggle */}
+      <div className="flex items-center px-3 py-2 border-b border-zinc-800/60">
+        <button
+          onClick={() => setShowGuide((v) => !v)}
+          className={`ml-auto px-2 py-1 text-[10px] font-bold rounded-md border transition-all ${
+            showGuide ? "border-zinc-600 text-zinc-200 bg-zinc-800" : "border-zinc-700 text-zinc-500 hover:text-zinc-300"
+          }`}
+        >
+          ? How to read
+        </button>
       </div>
+
+      {/* Glossary */}
+      {showGuide && (
+        <div className="border-b border-zinc-800/60 bg-zinc-900/60 px-4 py-3 flex flex-col gap-2.5">
+          <p className="text-[10px] text-zinc-400 font-semibold uppercase tracking-widest">How to read decisions</p>
+          {DECISION_GLOSSARY.map((g) => (
+            <div key={g.term}>
+              <span className="text-[11px] font-bold text-zinc-200">{g.term} — </span>
+              <span className="text-[11px] text-zinc-400 leading-relaxed">{g.explain}</span>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {/* Decision rows */}
+      <div className="flex flex-col divide-y divide-zinc-800/60">
+        {(data?.decisions ?? []).map((dec) => {
+          const sig = SIGNAL_TYPE_LABELS[dec.signalType] ?? { label: dec.signalType, explain: "" };
+          return (
+            <div
+              key={dec.id}
+              className={`px-4 py-3 transition-colors duration-700 ${flash === dec.id ? "bg-emerald-950/40" : ""}`}
+            >
+              {/* Row 1: ticker · action · status · time */}
+              <div className="flex items-center gap-2 mb-2">
+                <span className="text-xs font-mono font-bold text-zinc-100 w-14 shrink-0">{dec.ticker}</span>
+                <span title={dec.action === "BUY" ? "Positive signal — agent recommends entering a long position" : dec.action === "SELL" ? "Negative alpha — agent recommends avoiding or exiting" : "Signal blocked — no trade taken"}>
+                  <Badge label={dec.action} variant={dec.action.toLowerCase() as "buy" | "sell" | "hold"} />
+                </span>
+                <span title={dec.status === "executed" ? "Passed all Senso risk checks — would trigger a trade in a live system" : dec.status === "rejected" ? "Blocked by Senso risk gate — score too low or probabilistic risk check failed" : "Awaiting evaluation"}>
+                  <Badge label={dec.status} variant={dec.status} />
+                </span>
+                <span className="ml-auto text-[10px] text-zinc-500 font-mono" title="Time this decision was generated">
+                  {new Date(dec.timestamp).toLocaleTimeString()}
+                </span>
+              </div>
+
+              {/* Row 2: signal type pill + score bar */}
+              <div className="flex items-center gap-2 mb-1.5">
+                <span
+                  className="text-[10px] font-bold text-zinc-400 bg-zinc-800 border border-zinc-700 rounded px-1.5 py-0.5 shrink-0"
+                  title={sig.explain}
+                >
+                  {sig.label}
+                </span>
+                <div className="flex-1 flex items-center gap-1.5" title={`Score = 40% × alpha signal (${(dec.alphaSignal * 100).toFixed(0)}%) + 60% × arb confidence (${(dec.arbConfidence * 100).toFixed(0)}%) = ${dec.score.toFixed(3)}`}>
+                  <MiniBar value={dec.score * 100} max={100} color={dec.score > 0.5 ? "bg-emerald-500" : "bg-amber-500"} />
+                  <span className="text-[10px] font-mono font-bold text-zinc-300 shrink-0">{dec.score.toFixed(3)}</span>
+                </div>
+              </div>
+
+              {/* Row 3: alpha signal + arb confidence breakdown */}
+              <div className="grid grid-cols-2 gap-x-3 text-[10px] font-mono mb-1.5">
+                <span className="text-zinc-500" title="Normalised alpha signal (0–1). How strongly this ticker's 30-day alpha contributed to the score.">
+                  Alpha sig <span className={dec.alphaSignal > 0 ? "text-emerald-400" : "text-zinc-500"}>{(dec.alphaSignal * 100).toFixed(0)}%</span>
+                </span>
+                <span className="text-zinc-500" title="Arbitrage confidence (0–1). Strength of the spread/divergence/volume signal.">
+                  Arb conf <span className={dec.arbConfidence > 0 ? "text-sky-400" : "text-zinc-500"}>{(dec.arbConfidence * 100).toFixed(0)}%</span>
+                </span>
+              </div>
+
+              {/* Row 4: signal detail or block reason */}
+              {dec.blockedReason ? (
+                <p className="text-[11px] text-red-400/80 leading-relaxed" title="Why Senso blocked this decision">
+                  Blocked — {dec.blockedReason}
+                </p>
+              ) : (
+                dec.detail && (
+                  <p className="text-[11px] text-zinc-500 leading-relaxed" title="Raw signal details from the detector">
+                    {dec.detail}
+                  </p>
+                )
+              )}
+
+              {/* Row 5: decision ID */}
+              <p className="text-[10px] font-mono text-zinc-700 mt-1">{dec.id}</p>
+            </div>
+          );
+        })}
+      </div>
+
       <div className="px-4 pb-2 border-t border-zinc-800/60 pt-2">
         <p className="text-[10px] text-zinc-600">
-          Score = 40% alpha signal + 60% arb confidence · Senso gates each
-          decision · polling 3s
+          Score = 40% alpha signal + 60% arb confidence · Senso gates each decision · polling 3s
         </p>
       </div>
     </PanelShell>
