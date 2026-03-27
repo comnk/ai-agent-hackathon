@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useRef, useCallback } from "react";
+import { useState, useEffect, useRef } from "react";
 
 // ─── Config ───────────────────────────────────────────────────────────────────
 const API_BASE = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
@@ -18,6 +18,10 @@ type AlphaScore = {
   signal: "BUY" | "SELL" | "HOLD";
   confidence: number;     // 0–100
   momentum: number[];     // sparkline values
+  alpha_30d: number;      // annualised excess return vs SPY, 30-day window
+  alpha_90d: number;      // annualised excess return vs SPY, 90-day window
+  sharpe: number;         // risk-adjusted return (rf = 5%)
+  momentum_14d: number;   // 14-day rate-of-change
 };
 
 type AlphaResponse = {
@@ -83,53 +87,7 @@ type FeedbackPayload = {
 
 // ─── Mock Data ────────────────────────────────────────────────────────────────
 
-function mockAlpha(): AlphaResponse {
-  const signals: Array<"BUY" | "SELL" | "HOLD"> = ["BUY", "SELL", "HOLD"];
-  return {
-    timestamp: new Date().toISOString(),
-    scores: ALL_TICKERS.map((ticker) => {
-      const score = parseFloat((Math.random() * 2 - 1).toFixed(3));
-      return {
-        ticker,
-        score,
-        signal: score > 0.2 ? "BUY" : score < -0.2 ? "SELL" : "HOLD",
-        confidence: Math.floor(50 + Math.random() * 50),
-        momentum: Array.from({ length: 12 }, () =>
-          parseFloat((Math.random() * 10 - 5).toFixed(2))
-        ),
-      };
-    }),
-  };
-}
 
-function mockDecisions(): DecisionsResponse {
-  const actions: Array<"BUY" | "SELL" | "HOLD"> = ["BUY", "SELL", "HOLD"];
-  const statuses: Array<"executed" | "pending" | "rejected"> = [
-    "executed",
-    "pending",
-    "rejected",
-  ];
-  const rationales = [
-    "Momentum breakout above 20-day EMA with volume confirmation.",
-    "RSI overbought at 78; taking profit ahead of resistance.",
-    "Consolidation phase; waiting for clearer directional signal.",
-    "Macro tailwinds align with sector rotation into tech.",
-    "Risk-off signal from VIX spike; reducing exposure.",
-    "Earnings catalyst priced in; holding for continuation.",
-  ];
-  return {
-    decisions: Array.from({ length: 8 }, (_, i) => ({
-      id: `dec_${Date.now()}_${i}`,
-      ticker: ALL_TICKERS[i % ALL_TICKERS.length],
-      action: actions[Math.floor(Math.random() * actions.length)],
-      quantity: Math.floor(Math.random() * 200) + 10,
-      price: parseFloat((100 + Math.random() * 400).toFixed(2)),
-      rationale: rationales[i % rationales.length],
-      timestamp: new Date(Date.now() - i * 1000 * 60 * 2).toISOString(),
-      status: statuses[Math.floor(Math.random() * statuses.length)],
-    })),
-  };
-}
 
 function mockOptimizer(): OptimizerResponse {
   return {
@@ -196,20 +154,26 @@ async function getAlpha(): Promise<AlphaResponse> {
   try {
     const raw: Array<{ ticker: string; alpha_30d: number; alpha_90d: number; sharpe: number; momentum_14d: number }> =
       await (await fetch(`${API_BASE}/alpha`)).json();
-    if (!Array.isArray(raw) || raw.length === 0) return mockAlpha();
+    if (!Array.isArray(raw)) return { timestamp: new Date().toISOString(), scores: [] };
     return {
       timestamp: new Date().toISOString(),
       scores: raw.map((r) => {
-        const score = Math.max(-1, Math.min(1, r.alpha_30d ?? 0));
-        const signal: "BUY" | "SELL" | "HOLD" = score > 0.1 ? "BUY" : score < -0.1 ? "SELL" : "HOLD";
-        const confidence = Math.min(100, Math.max(0, Math.round(Math.abs(r.sharpe ?? 0) * 40)));
+        const a30 = r.alpha_30d ?? 0;
+        const a90 = r.alpha_90d ?? 0;
+        const sharpe = r.sharpe ?? 0;
         const m = r.momentum_14d ?? 0;
-        const momentum = Array.from({ length: 12 }, (_, i) => parseFloat((m * (0.5 + i / 12)).toFixed(3)));
-        return { ticker: r.ticker, score, signal, confidence, momentum };
+        const score = Math.max(-1, Math.min(1, a30));
+        const signal: "BUY" | "SELL" | "HOLD" = a30 > 0.05 ? "BUY" : a30 < -0.05 ? "SELL" : "HOLD";
+        const directionAgree = Math.sign(a30) === Math.sign(a90) ? 40 : 10;
+        const sharpeBoost = sharpe > 0 ? Math.min(40, sharpe * 20) : 0;
+        const momentumBoost = Math.abs(m) > 0.02 ? 20 : 10;
+        const confidence = Math.round(Math.min(100, directionAgree + sharpeBoost + momentumBoost));
+        const momentum = Array.from({ length: 12 }, (_, i) => parseFloat((m * (0.5 + i / 12)).toFixed(4)));
+        return { ticker: r.ticker, score, signal, confidence, momentum, alpha_30d: a30, alpha_90d: a90, sharpe, momentum_14d: m };
       }),
     };
   } catch {
-    return mockAlpha();
+    return { timestamp: new Date().toISOString(), scores: [] };
   }
 }
 
@@ -217,18 +181,17 @@ async function getDecisions(): Promise<DecisionsResponse> {
   try {
     const raw: Array<{ id: string; ticker: string; score: number; type: string; status: string; blocked_reason: string | null; timestamp: string }> =
       await (await fetch(`${API_BASE}/decisions`)).json();
-    if (!Array.isArray(raw) || raw.length === 0) return mockDecisions();
+    if (!Array.isArray(raw)) return { decisions: [] };
     return {
       decisions: raw.map((r) => {
-        // score > 0 means positive alpha or arb opportunity → BUY; blocked → HOLD
         const action: "BUY" | "SELL" | "HOLD" = r.status === "blocked" ? "HOLD" : r.score > 0 ? "BUY" : "SELL";
         const status: "executed" | "pending" | "rejected" = r.status === "approved" ? "executed" : r.status === "blocked" ? "rejected" : "pending";
         return {
           id: r.id,
           ticker: r.ticker,
           action,
-          quantity: null as unknown as number,  // not available from backend
-          price: null as unknown as number,      // not available from backend
+          quantity: null as unknown as number,
+          price: null as unknown as number,
           rationale: r.blocked_reason ?? `${r.type} signal · score ${r.score.toFixed(3)}`,
           timestamp: r.timestamp,
           status,
@@ -236,7 +199,7 @@ async function getDecisions(): Promise<DecisionsResponse> {
       }),
     };
   } catch {
-    return mockDecisions();
+    return { decisions: [] };
   }
 }
 
@@ -351,33 +314,64 @@ function AlphaPanel() {
     return () => clearInterval(id);
   }, []);
 
+  const sharpeColor = (v: number) => v >= 1 ? "text-emerald-400" : v >= 0 ? "text-zinc-300" : "text-red-400";
+  const sharpeLabel = (v: number) => v >= 2 ? "excellent" : v >= 1 ? "good" : v >= 0 ? "weak" : "negative";
+  const pct = (v: number) => `${v >= 0 ? "+" : ""}${(v * 100).toFixed(1)}%`;
+
   return (
-    <PanelShell title="Alpha Scores" subtitle="Signal strength across watched tickers" live>
-      <div className="p-3 flex flex-col gap-2">
+    <PanelShell title="Alpha Scores" subtitle="How much each ticker beats or lags SPY (annualised, rf = 5%)" live>
+      <div className="flex flex-col divide-y divide-zinc-800/60">
         {(data?.scores ?? []).map((s) => {
-          const isPos = s.score >= 0;
+          const isPos = s.alpha_30d >= 0;
           const barColor = s.signal === "BUY" ? "bg-emerald-500" : s.signal === "SELL" ? "bg-red-500" : "bg-zinc-600";
+          const trendAgree = Math.sign(s.alpha_30d) === Math.sign(s.alpha_90d);
           return (
-            <div key={s.ticker} className="flex items-center gap-3">
-              <span className="text-xs font-mono font-bold text-zinc-200 w-10 shrink-0">{s.ticker}</span>
-              <Badge label={s.signal} variant={s.signal.toLowerCase() as "buy" | "sell" | "hold"} />
-              <div className="flex-1">
-                <div className="flex items-center justify-between mb-0.5">
-                  <span className={`text-[10px] font-mono ${isPos ? "text-emerald-400" : "text-red-400"}`}>
-                    {isPos ? "+" : ""}{s.score.toFixed(3)}
-                  </span>
-                  <span className="text-[10px] text-zinc-500">{s.confidence}% conf</span>
-                </div>
-                <MiniBar value={Math.abs(s.score) * 100} max={100} color={barColor} />
+            <div key={s.ticker} className="px-4 py-3">
+              {/* Row 1: ticker · signal · confidence · sparkline */}
+              <div className="flex items-center gap-2 mb-2">
+                <span className="text-xs font-mono font-bold text-zinc-100 w-10 shrink-0">{s.ticker}</span>
+                <span title={s.signal === "BUY" ? "Positive alpha — outperforming SPY" : s.signal === "SELL" ? "Negative alpha — underperforming SPY" : "Alpha near zero — no clear edge vs SPY"}>
+                  <Badge label={s.signal} variant={s.signal.toLowerCase() as "buy" | "sell" | "hold"} />
+                </span>
+                <span className="text-[10px] text-zinc-500 ml-auto" title="Confidence: based on 30d/90d alpha direction agreement + positive Sharpe + momentum. Higher = more consistent signal.">
+                  {s.confidence}% conf
+                </span>
+                <span title="14-day price momentum sparkline">
+                  <MiniSparkline values={s.momentum} positive={isPos} />
+                </span>
               </div>
-              <MiniSparkline values={s.momentum} positive={isPos} />
+              {/* Row 2: alpha vs SPY bar */}
+              <div className="flex items-center gap-2 mb-1.5" title={`30-day alpha: ${s.ticker} returned ${pct(s.alpha_30d)} more/less than SPY annualised over 30 days`}>
+                <span className="text-[10px] text-zinc-600 w-16 shrink-0">vs SPY 30d</span>
+                <MiniBar value={Math.abs(s.alpha_30d) * 100} max={50} color={barColor} />
+                <span className={`text-[10px] font-mono font-bold w-14 text-right shrink-0 ${isPos ? "text-emerald-400" : "text-red-400"}`}>
+                  {pct(s.alpha_30d)}
+                </span>
+              </div>
+              {/* Row 3: stats grid */}
+              <div className="grid grid-cols-3 gap-x-2 text-[10px] font-mono">
+                <span className="text-zinc-500" title="90-day alpha vs SPY. If 30d and 90d agree in direction, the signal is more reliable.">
+                  90d alpha <span className={s.alpha_90d >= 0 ? "text-emerald-400" : "text-red-400"}>{pct(s.alpha_90d)}</span>
+                </span>
+                <span className="text-zinc-500" title={`Sharpe = (annualised return − 5% rf) ÷ volatility. Above 1.0 is good. This is ${sharpeLabel(s.sharpe)}.`}>
+                  Sharpe <span className={sharpeColor(s.sharpe)}>{s.sharpe.toFixed(2)}</span>
+                </span>
+                <span className="text-zinc-500" title={`Price changed ${pct(s.momentum_14d)} over the last 14 trading days. Positive = upward trend.`}>
+                  14d mom <span className={s.momentum_14d >= 0 ? "text-emerald-400" : "text-red-400"}>{pct(s.momentum_14d)}</span>
+                </span>
+              </div>
+              {!trendAgree && (
+                <div className="mt-1.5 text-[10px] text-amber-500" title="30d and 90d alpha point in opposite directions — short-term trend may be reversing.">
+                  ⚠ mixed signal — 30d and 90d alpha disagree
+                </div>
+              )}
             </div>
           );
         })}
       </div>
-      <div className="px-3 pb-2">
+      <div className="px-4 pb-2 border-t border-zinc-800/60 pt-2">
         <p className="text-[10px] text-zinc-600">
-          Updated {data ? new Date(data.timestamp).toLocaleTimeString() : "—"} · polling 2s
+          Updated {data ? new Date(data.timestamp).toLocaleTimeString() : "—"} · polling 2s · alpha = annualised ticker return − SPY return
         </p>
       </div>
     </PanelShell>
@@ -409,34 +403,33 @@ function DecisionLog() {
   }, []);
 
   return (
-    <PanelShell title="Decision Log" subtitle="Overmind agent trade decisions" live>
+    <PanelShell title="Decision Log" subtitle="Scored opportunities after Senso risk gate · updated every 5s" live>
       <div className="flex flex-col divide-y divide-zinc-800/60">
         {(data?.decisions ?? []).map((dec) => (
-          <div
-            key={dec.id}
-            className={`px-4 py-3 transition-colors duration-700 ${flash === dec.id ? "bg-emerald-950/40" : ""}`}
-          >
-            <div className="flex items-center gap-2 mb-1">
+          <div key={dec.id} className={`px-4 py-3 transition-colors duration-700 ${flash === dec.id ? "bg-emerald-950/40" : ""}`}>
+            <div className="flex items-center gap-2 mb-1.5">
               <span className="text-xs font-mono font-bold text-zinc-100">{dec.ticker}</span>
-              <Badge label={dec.action} variant={dec.action.toLowerCase() as "buy" | "sell" | "hold"} />
-              <Badge label={dec.status} variant={dec.status} />
-              <span className="ml-auto text-[10px] text-zinc-500 font-mono">
+              <span title={dec.action === "BUY" ? "Positive alpha — agent recommends entering a long position" : dec.action === "SELL" ? "Negative alpha — agent recommends avoiding or exiting" : "Signal below threshold — no action taken"}>
+                <Badge label={dec.action} variant={dec.action.toLowerCase() as "buy" | "sell" | "hold"} />
+              </span>
+              <span title={dec.status === "executed" ? "Approved — passed all Senso risk checks" : dec.status === "rejected" ? "Blocked — failed Senso risk gate (score too low or risk limits exceeded)" : "Pending — awaiting risk gate evaluation"}>
+                <Badge label={dec.status} variant={dec.status} />
+              </span>
+              <span className="ml-auto text-[10px] text-zinc-500 font-mono" title="Time this decision was generated by the agent loop">
                 {new Date(dec.timestamp).toLocaleTimeString()}
               </span>
             </div>
-            {dec.price != null && (
-              <div className="flex items-baseline gap-3 mb-1">
-                <span className="text-sm font-mono font-bold text-white">
-                  ${dec.price.toFixed(2)}
-                </span>
-                {dec.quantity != null && (
-                  <span className="text-[11px] text-zinc-400">× {dec.quantity} shares</span>
-                )}
-              </div>
-            )}
-            <p className="text-[11px] text-zinc-500 leading-relaxed line-clamp-2">{dec.rationale}</p>
+            <div className="flex items-center gap-2 mb-1 text-[10px] font-mono text-zinc-600">
+              <span title="Unique decision ID">{dec.id}</span>
+            </div>
+            <p className="text-[11px] text-zinc-400 leading-relaxed" title={dec.status === "rejected" ? "Reason blocked by Senso risk gate" : "Signal type and score that triggered this decision"}>
+              {dec.rationale}
+            </p>
           </div>
         ))}
+      </div>
+      <div className="px-4 pb-2 border-t border-zinc-800/60 pt-2">
+        <p className="text-[10px] text-zinc-600">Score = 40% alpha signal + 60% arb confidence · Senso gates each decision · polling 3s</p>
       </div>
     </PanelShell>
   );
@@ -446,13 +439,10 @@ function DecisionLog() {
 
 function OptimizerPanel() {
   const [data, setData] = useState<OptimizerResponse | null>(null);
-  const [prev, setPrev] = useState<OptimizerResponse | null>(null);
 
   useEffect(() => {
     const tick = async () => {
-      const d = await getOptimizer();
-      setPrev((p) => p);
-      setData(d);
+      setData(await getOptimizer());
     };
     tick();
     const id = setInterval(tick, 5000);
