@@ -47,7 +47,14 @@ async def _check_async(opportunity: dict) -> bool:
 
     ticker = opportunity.get("ticker", "UNKNOWN")
     opp_type = opportunity.get("type", "unknown")
-    confidence = opportunity.get("confidence", 0.0)
+    # Xiao's alpha opportunities use alpha_signal; arbitrage uses arb_confidence.
+    # Fall back through all known confidence fields before defaulting to 0.0.
+    confidence = (
+        opportunity.get("confidence")
+        or opportunity.get("alpha_signal")
+        or opportunity.get("arb_confidence")
+        or 0.0
+    )
     detail = opportunity.get("detail", "")
 
     # ── Step 1: query Senso KB for relevant risk rules ──────────────

@@ -32,3 +32,8 @@
 - "aggressive" mode: lower all confidence thresholds by 0.1
 - "volatile days" mode: apply TSLA-level strict rules to ALL tickers
 - Default mode: use standard thresholds as defined above
+
+
+## Trader Feedback (latest)
+- "Be more conservative on volatile days"
+- Applied: switched to conservative mode (thresholds raised by 0.1); volatile-days mode activated (strict rules applied to all tickers)
