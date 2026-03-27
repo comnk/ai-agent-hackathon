@@ -14,6 +14,30 @@ import {
 // ─── Config ───────────────────────────────────────────────────────────────────
 const API_BASE = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
 
+// ─── Market hours ─────────────────────────────────────────────────────────────
+// NYSE/NASDAQ: Mon–Fri 09:30–16:00 US Eastern time
+function getMarketStatus(): { open: boolean; label: string; note: string } {
+  const now = new Date();
+  // Convert to US Eastern (UTC-5 standard / UTC-4 daylight)
+  const etOffset = isDST(now) ? -4 : -5;
+  const et = new Date(now.getTime() + (etOffset - now.getTimezoneOffset() / 60) * 3600_000);
+  const day = et.getDay(); // 0=Sun, 6=Sat
+  const minutes = et.getHours() * 60 + et.getMinutes();
+  const open = day >= 1 && day <= 5 && minutes >= 9 * 60 + 30 && minutes < 16 * 60;
+  const label = open ? "Market open" : "Market closed";
+  const note = open
+    ? "Live quotes are current"
+    : "Quotes are from last session · arbitrage signals may not reflect real opportunities";
+  return { open, label, note };
+}
+
+function isDST(d: Date): boolean {
+  // DST in the US: second Sunday of March through first Sunday of November
+  const jan = new Date(d.getFullYear(), 0, 1).getTimezoneOffset();
+  const jul = new Date(d.getFullYear(), 6, 1).getTimezoneOffset();
+  return d.getTimezoneOffset() < Math.max(jan, jul);
+}
+
 // ─── Tickers ──────────────────────────────────────────────────────────────────
 const WATCHED = ["AAPL", "TSLA", "NVDA", "QQQ"];
 const BENCHMARKS = ["SPY", "DJI"];
@@ -906,7 +930,13 @@ function DecisionLog() {
   const [data, setData] = useState<DecisionsResponse | null>(null);
   const [flash, setFlash] = useState<string | null>(null);
   const [showGuide, setShowGuide] = useState(false);
+  const [market, setMarket] = useState(getMarketStatus);
   const prevIds = useRef<Set<string>>(new Set());
+
+  useEffect(() => {
+    const id = setInterval(() => setMarket(getMarketStatus()), 60_000);
+    return () => clearInterval(id);
+  }, []);
 
   useEffect(() => {
     const tick = async () => {
@@ -954,6 +984,16 @@ function DecisionLog() {
               <span className="text-[11px] text-zinc-400 leading-relaxed">{g.explain}</span>
             </div>
           ))}
+        </div>
+      )}
+
+      {/* Market closed warning */}
+      {!market.open && (
+        <div className="px-4 py-2 bg-amber-950/40 border-b border-amber-800/40 flex items-start gap-2">
+          <span className="text-amber-400 text-xs shrink-0 mt-0.5">⚠</span>
+          <p className="text-[11px] text-amber-400/80 leading-relaxed">
+            <span className="font-bold">Market is closed.</span> The agent is still running but live quotes are from the last session — arbitrage signals (Slippage Window, HFT Window, Price Divergence) may not reflect real opportunities. Alpha scores are unaffected.
+          </p>
         </div>
       )}
 
@@ -1373,6 +1413,13 @@ function FeedbackPanel() {
 // ─── Agent Dashboard Root ─────────────────────────────────────────────────────
 
 export default function AgentDashboard() {
+  const [market, setMarket] = useState(getMarketStatus);
+
+  useEffect(() => {
+    const id = setInterval(() => setMarket(getMarketStatus()), 60_000);
+    return () => clearInterval(id);
+  }, []);
+
   return (
     <div className="w-full bg-black min-h-screen py-6 px-4 sm:px-6 lg:px-8 font-sans">
       {/* Header */}
@@ -1387,9 +1434,23 @@ export default function AgentDashboard() {
               {BENCHMARKS.join(", ")}
             </p>
           </div>
-          <div className="ml-auto flex items-center gap-1.5">
-            <PulsingDot active />
-            <span className="text-[11px] text-zinc-400">All systems live</span>
+          <div className="ml-auto flex items-center gap-3">
+            {/* Market status */}
+            <span
+              className={`flex items-center gap-1.5 px-2 py-1 rounded-md border text-[10px] font-bold uppercase tracking-widest ${
+                market.open
+                  ? "border-emerald-800 bg-emerald-950/50 text-emerald-400"
+                  : "border-zinc-700 bg-zinc-900 text-zinc-500"
+              }`}
+              title={market.note}
+            >
+              <PulsingDot active={market.open} />
+              {market.label}
+            </span>
+            <div className="flex items-center gap-1.5">
+              <PulsingDot active />
+              <span className="text-[11px] text-zinc-400">Agent running</span>
+            </div>
           </div>
         </div>
       </div>
