@@ -20,10 +20,13 @@ function getMarketStatus(): { open: boolean; label: string; note: string } {
   const now = new Date();
   // Convert to US Eastern (UTC-5 standard / UTC-4 daylight)
   const etOffset = isDST(now) ? -4 : -5;
-  const et = new Date(now.getTime() + (etOffset - now.getTimezoneOffset() / 60) * 3600_000);
+  const et = new Date(
+    now.getTime() + (etOffset - now.getTimezoneOffset() / 60) * 3600_000,
+  );
   const day = et.getDay(); // 0=Sun, 6=Sat
   const minutes = et.getHours() * 60 + et.getMinutes();
-  const open = day >= 1 && day <= 5 && minutes >= 9 * 60 + 30 && minutes < 16 * 60;
+  const open =
+    day >= 1 && day <= 5 && minutes >= 9 * 60 + 30 && minutes < 16 * 60;
   const label = open ? "Market open" : "Market closed";
   const note = open
     ? "Live quotes are current"
@@ -66,11 +69,11 @@ type Decision = {
   ticker: string;
   action: "BUY" | "SELL" | "HOLD";
   status: "executed" | "pending" | "rejected";
-  signalType: string;       // alpha | slippage_window | price_divergence | hft_window
-  score: number;            // composite 0–1
-  alphaSignal: number;      // normalised alpha contribution 0–1
-  arbConfidence: number;    // arbitrage confidence 0–1
-  detail: string;           // human-readable reason from the signal detector
+  signalType: string; // alpha | slippage_window | price_divergence | hft_window
+  score: number; // composite 0–1
+  alphaSignal: number; // normalised alpha contribution 0–1
+  arbConfidence: number; // arbitrage confidence 0–1
+  detail: string; // human-readable reason from the signal detector
   blockedReason: string | null;
   timestamp: string;
 };
@@ -262,7 +265,11 @@ async function getDecisions(): Promise<DecisionsResponse> {
         const action: "BUY" | "SELL" | "HOLD" =
           r.status === "blocked" ? "HOLD" : r.score > 0 ? "BUY" : "SELL";
         const status: "executed" | "pending" | "rejected" =
-          r.status === "approved" ? "executed" : r.status === "blocked" ? "rejected" : "pending";
+          r.status === "approved"
+            ? "executed"
+            : r.status === "blocked"
+              ? "rejected"
+              : "pending";
         return {
           id: r.id,
           ticker: r.ticker,
@@ -410,7 +417,6 @@ function MiniBar({
   );
 }
 
-
 function PanelShell({
   title,
   subtitle,
@@ -442,7 +448,9 @@ function PanelShell({
           </span>
         </div>
       </div>
-      <div className="flex-1 overflow-y-auto" style={{ maxHeight }}>{children}</div>
+      <div className="flex-1 overflow-y-auto" style={{ maxHeight }}>
+        {children}
+      </div>
     </div>
   );
 }
@@ -967,7 +975,9 @@ function DecisionLog() {
         <button
           onClick={() => setShowGuide((v) => !v)}
           className={`ml-auto px-2 py-1 text-[10px] font-bold rounded-md border transition-all ${
-            showGuide ? "border-zinc-600 text-zinc-200 bg-zinc-800" : "border-zinc-700 text-zinc-500 hover:text-zinc-300"
+            showGuide
+              ? "border-zinc-600 text-zinc-200 bg-zinc-800"
+              : "border-zinc-700 text-zinc-500 hover:text-zinc-300"
           }`}
         >
           ? How to read
@@ -977,11 +987,17 @@ function DecisionLog() {
       {/* Glossary */}
       {showGuide && (
         <div className="border-b border-zinc-800/60 bg-zinc-900/60 px-4 py-3 flex flex-col gap-2.5">
-          <p className="text-[10px] text-zinc-400 font-semibold uppercase tracking-widest">How to read decisions</p>
+          <p className="text-[10px] text-zinc-400 font-semibold uppercase tracking-widest">
+            How to read decisions
+          </p>
           {DECISION_GLOSSARY.map((g) => (
             <div key={g.term}>
-              <span className="text-[11px] font-bold text-zinc-200">{g.term} — </span>
-              <span className="text-[11px] text-zinc-400 leading-relaxed">{g.explain}</span>
+              <span className="text-[11px] font-bold text-zinc-200">
+                {g.term} —{" "}
+              </span>
+              <span className="text-[11px] text-zinc-400 leading-relaxed">
+                {g.explain}
+              </span>
             </div>
           ))}
         </div>
@@ -992,7 +1008,10 @@ function DecisionLog() {
         <div className="px-4 py-2 bg-amber-950/40 border-b border-amber-800/40 flex items-start gap-2">
           <span className="text-amber-400 text-xs shrink-0 mt-0.5">⚠</span>
           <p className="text-[11px] text-amber-400/80 leading-relaxed">
-            <span className="font-bold">Market is closed.</span> The agent is still running but live quotes are from the last session — arbitrage signals (Slippage Window, HFT Window, Price Divergence) may not reflect real opportunities. Alpha scores are unaffected.
+            <span className="font-bold">Market is closed.</span> The agent is
+            still running but live quotes are from the last session — arbitrage
+            signals (Slippage Window, HFT Window, Price Divergence) may not
+            reflect real opportunities. Alpha scores are unaffected.
           </p>
         </div>
       )}
@@ -1000,7 +1019,10 @@ function DecisionLog() {
       {/* Decision rows */}
       <div className="flex flex-col divide-y divide-zinc-800/60">
         {(data?.decisions ?? []).map((dec) => {
-          const sig = SIGNAL_TYPE_LABELS[dec.signalType] ?? { label: dec.signalType, explain: "" };
+          const sig = SIGNAL_TYPE_LABELS[dec.signalType] ?? {
+            label: dec.signalType,
+            explain: "",
+          };
           return (
             <div
               key={dec.id}
@@ -1008,14 +1030,40 @@ function DecisionLog() {
             >
               {/* Row 1: ticker · action · status · time */}
               <div className="flex items-center gap-2 mb-2">
-                <span className="text-xs font-mono font-bold text-zinc-100 w-14 shrink-0">{dec.ticker}</span>
-                <span title={dec.action === "BUY" ? "Positive signal — agent recommends entering a long position" : dec.action === "SELL" ? "Negative alpha — agent recommends avoiding or exiting" : "Signal blocked — no trade taken"}>
-                  <Badge label={dec.action} variant={dec.action.toLowerCase() as "buy" | "sell" | "hold"} />
+                <span className="text-xs font-mono font-bold text-zinc-100 w-14 shrink-0">
+                  {dec.ticker}
                 </span>
-                <span title={dec.status === "executed" ? "Passed all Senso risk checks — would trigger a trade in a live system" : dec.status === "rejected" ? "Blocked by Senso risk gate — score too low or probabilistic risk check failed" : "Awaiting evaluation"}>
+                <span
+                  title={
+                    dec.action === "BUY"
+                      ? "Positive signal — agent recommends entering a long position"
+                      : dec.action === "SELL"
+                        ? "Negative alpha — agent recommends avoiding or exiting"
+                        : "Signal blocked — no trade taken"
+                  }
+                >
+                  <Badge
+                    label={dec.action}
+                    variant={
+                      dec.action.toLowerCase() as "buy" | "sell" | "hold"
+                    }
+                  />
+                </span>
+                <span
+                  title={
+                    dec.status === "executed"
+                      ? "Passed all Senso risk checks — would trigger a trade in a live system"
+                      : dec.status === "rejected"
+                        ? "Blocked by Senso risk gate — score too low or probabilistic risk check failed"
+                        : "Awaiting evaluation"
+                  }
+                >
                   <Badge label={dec.status} variant={dec.status} />
                 </span>
-                <span className="ml-auto text-[10px] text-zinc-500 font-mono" title="Time this decision was generated">
+                <span
+                  className="ml-auto text-[10px] text-zinc-500 font-mono"
+                  title="Time this decision was generated"
+                >
                   {new Date(dec.timestamp).toLocaleTimeString()}
                 </span>
               </div>
@@ -1028,37 +1076,74 @@ function DecisionLog() {
                 >
                   {sig.label}
                 </span>
-                <div className="flex-1 flex items-center gap-1.5" title={`Score = 40% × alpha signal (${(dec.alphaSignal * 100).toFixed(0)}%) + 60% × arb confidence (${(dec.arbConfidence * 100).toFixed(0)}%) = ${dec.score.toFixed(3)}`}>
-                  <MiniBar value={dec.score * 100} max={100} color={dec.score > 0.5 ? "bg-emerald-500" : "bg-amber-500"} />
-                  <span className="text-[10px] font-mono font-bold text-zinc-300 shrink-0">{dec.score.toFixed(3)}</span>
+                <div
+                  className="flex-1 flex items-center gap-1.5"
+                  title={`Score = 40% × alpha signal (${(dec.alphaSignal * 100).toFixed(0)}%) + 60% × arb confidence (${(dec.arbConfidence * 100).toFixed(0)}%) = ${dec.score.toFixed(3)}`}
+                >
+                  <MiniBar
+                    value={dec.score * 100}
+                    max={100}
+                    color={dec.score > 0.5 ? "bg-emerald-500" : "bg-amber-500"}
+                  />
+                  <span className="text-[10px] font-mono font-bold text-zinc-300 shrink-0">
+                    {dec.score.toFixed(3)}
+                  </span>
                 </div>
               </div>
 
               {/* Row 3: alpha signal + arb confidence breakdown */}
               <div className="grid grid-cols-2 gap-x-3 text-[10px] font-mono mb-1.5">
-                <span className="text-zinc-500" title="Normalised alpha signal (0–1). How strongly this ticker's 30-day alpha contributed to the score.">
-                  Alpha sig <span className={dec.alphaSignal > 0 ? "text-emerald-400" : "text-zinc-500"}>{(dec.alphaSignal * 100).toFixed(0)}%</span>
+                <span
+                  className="text-zinc-500"
+                  title="Normalised alpha signal (0–1). How strongly this ticker's 30-day alpha contributed to the score."
+                >
+                  Alpha sig{" "}
+                  <span
+                    className={
+                      dec.alphaSignal > 0 ? "text-emerald-400" : "text-zinc-500"
+                    }
+                  >
+                    {(dec.alphaSignal * 100).toFixed(0)}%
+                  </span>
                 </span>
-                <span className="text-zinc-500" title="Arbitrage confidence (0–1). Strength of the spread/divergence/volume signal.">
-                  Arb conf <span className={dec.arbConfidence > 0 ? "text-sky-400" : "text-zinc-500"}>{(dec.arbConfidence * 100).toFixed(0)}%</span>
+                <span
+                  className="text-zinc-500"
+                  title="Arbitrage confidence (0–1). Strength of the spread/divergence/volume signal."
+                >
+                  Arb conf{" "}
+                  <span
+                    className={
+                      dec.arbConfidence > 0 ? "text-sky-400" : "text-zinc-500"
+                    }
+                  >
+                    {(dec.arbConfidence * 100).toFixed(0)}%
+                  </span>
                 </span>
               </div>
 
               {/* Row 4: signal detail or block reason */}
               {dec.blockedReason ? (
-                <p className="text-[11px] text-red-400/80 leading-relaxed" title="Why Senso blocked this decision">
+                <p
+                  className="text-[11px] text-red-400/80 leading-relaxed"
+                  title="Why Senso blocked this decision"
+                >
                   Blocked — {dec.blockedReason}
                 </p>
               ) : (
                 dec.detail && (
-                  <p className="text-[11px] text-zinc-500 leading-relaxed" title="Raw signal details from the detector">
+                  <p
+                    className="text-[11px] text-zinc-500 leading-relaxed"
+                    title="Raw signal details from the detector"
+                  >
                     {dec.detail}
                   </p>
                 )
               )}
 
               {/* Row 5: decision ID */}
-              <p className="text-[10px] font-mono text-zinc-700 mt-1">{dec.id}</p>
+              <p className="text-[10px] font-mono text-zinc-700 mt-1">
+                {dec.id}
+              </p>
             </div>
           );
         })}
@@ -1066,7 +1151,8 @@ function DecisionLog() {
 
       <div className="px-4 pb-2 border-t border-zinc-800/60 pt-2">
         <p className="text-[10px] text-zinc-600">
-          Score = 40% alpha signal + 60% arb confidence · Senso gates each decision · polling 3s
+          Score = 40% alpha signal + 60% arb confidence · Senso gates each
+          decision · polling 3s
         </p>
       </div>
     </PanelShell>
@@ -1418,13 +1504,16 @@ const ABOUT_SECTIONS = [
     title: "What is QuantMind?",
     content: (
       <p className="text-[12px] text-zinc-400 leading-relaxed">
-        QuantMind is an autonomous AI agent that continuously analyzes financial markets, identifies alpha
-        opportunities, and gets smarter after every cycle. It monitors multiple tickers (AAPL, TSLA, NVDA, QQQ)
-        against benchmark indexes (SPY, DJI), detects high-frequency arbitrage windows and positive slippage
-        opportunities, and refines its own strategy based on what worked and what didn&apos;t — with no human required
-        to keep it running. Every decision is logged, evaluated, and fed back into its own model through
-        Overmind&apos;s optimization loop. Traders can also provide direct feedback to fine-tune the agent&apos;s risk
-        appetite and market focus.
+        QuantMind is an autonomous AI agent that continuously analyzes financial
+        markets, identifies alpha opportunities, and gets smarter after every
+        cycle. It monitors multiple tickers (AAPL, TSLA, NVDA, QQQ) against
+        benchmark indexes (SPY, DJI), detects high-frequency arbitrage windows
+        and positive slippage opportunities, and refines its own strategy based
+        on what worked and what didn&apos;t — with no human required to keep it
+        running. Every decision is logged, evaluated, and fed back into its own
+        model through Overmind&apos;s optimization loop. Traders can also
+        provide direct feedback to fine-tune the agent&apos;s risk appetite and
+        market focus.
       </p>
     ),
   },
@@ -1434,43 +1523,55 @@ const ABOUT_SECTIONS = [
     content: (
       <div className="flex flex-col gap-3">
         <div>
-          <p className="text-[11px] font-bold text-zinc-200 mb-0.5">Alpha Score (−1 to +1)</p>
+          <p className="text-[11px] font-bold text-zinc-200 mb-0.5">
+            Alpha Score (−1 to +1)
+          </p>
           <p className="text-[11px] text-zinc-400 leading-relaxed font-mono bg-zinc-900 rounded px-2 py-1 mb-1">
             alpha = annualised(ticker_return) − annualised(SPY_return)
           </p>
           <p className="text-[11px] text-zinc-400 leading-relaxed">
-            Measures how much a stock outperforms or lags the S&amp;P 500 over 30-day and 90-day rolling windows.
-            alpha_30d &gt; +5% → BUY signal; &lt; −5% → SELL; otherwise HOLD.
+            Measures how much a stock outperforms or lags the S&amp;P 500 over
+            30-day and 90-day rolling windows. alpha_30d &gt; +5% → BUY signal;
+            &lt; −5% → SELL; otherwise HOLD.
           </p>
         </div>
         <div>
-          <p className="text-[11px] font-bold text-zinc-200 mb-0.5">Confidence % (0–100)</p>
+          <p className="text-[11px] font-bold text-zinc-200 mb-0.5">
+            Confidence % (0–100)
+          </p>
           <p className="text-[11px] text-zinc-400 leading-relaxed font-mono bg-zinc-900 rounded px-2 py-1 mb-1">
-            confidence = direction_agreement(40) + sharpe_boost(0–40) + momentum_boost(10–20)
+            confidence = direction_agreement(40) + sharpe_boost(0–40) +
+            momentum_boost(10–20)
           </p>
           <p className="text-[11px] text-zinc-400 leading-relaxed">
-            40 pts if 30d and 90d alpha agree in direction, up to 40 pts for positive Sharpe ratio, up to 20 pts
-            for strong 14-day momentum.
+            40 pts if 30d and 90d alpha agree in direction, up to 40 pts for
+            positive Sharpe ratio, up to 20 pts for strong 14-day momentum.
           </p>
         </div>
         <div>
-          <p className="text-[11px] font-bold text-zinc-200 mb-0.5">Decision Score (0–1)</p>
+          <p className="text-[11px] font-bold text-zinc-200 mb-0.5">
+            Decision Score (0–1)
+          </p>
           <p className="text-[11px] text-zinc-400 leading-relaxed font-mono bg-zinc-900 rounded px-2 py-1 mb-1">
             score = 0.4 × alpha_signal + 0.6 × arb_confidence
           </p>
           <p className="text-[11px] text-zinc-400 leading-relaxed">
-            Composite signal strength combining alpha and arbitrage signals. Senso passes decisions with score ≥ 0.3
-            through the probabilistic risk gate; below that threshold the decision is rejected.
+            Composite signal strength combining alpha and arbitrage signals.
+            Senso passes decisions with score ≥ 0.3 through the probabilistic
+            risk gate; below that threshold the decision is rejected.
           </p>
         </div>
         <div>
-          <p className="text-[11px] font-bold text-zinc-200 mb-0.5">Sharpe Ratio</p>
+          <p className="text-[11px] font-bold text-zinc-200 mb-0.5">
+            Sharpe Ratio
+          </p>
           <p className="text-[11px] text-zinc-400 leading-relaxed font-mono bg-zinc-900 rounded px-2 py-1 mb-1">
-            sharpe = (annualised_return − 5% risk-free rate) ÷ annualised_volatility
+            sharpe = (annualised_return − 5% risk-free rate) ÷
+            annualised_volatility
           </p>
           <p className="text-[11px] text-zinc-400 leading-relaxed">
-            Risk-adjusted return. Above 1.0 is good, above 2.0 is excellent. Negative means the stock doesn&apos;t
-            compensate for its own risk.
+            Risk-adjusted return. Above 1.0 is good, above 2.0 is excellent.
+            Negative means the stock doesn&apos;t compensate for its own risk.
           </p>
         </div>
       </div>
@@ -1504,8 +1605,12 @@ const ABOUT_SECTIONS = [
           },
         ].map((p) => (
           <div key={p.name}>
-            <p className="text-[11px] font-bold text-zinc-200 mb-0.5">{p.name}</p>
-            <p className="text-[11px] text-zinc-400 leading-relaxed">{p.desc}</p>
+            <p className="text-[11px] font-bold text-zinc-200 mb-0.5">
+              {p.name}
+            </p>
+            <p className="text-[11px] text-zinc-400 leading-relaxed">
+              {p.desc}
+            </p>
           </div>
         ))}
       </div>
@@ -1517,23 +1622,66 @@ const ABOUT_SECTIONS = [
     content: (
       <div className="flex flex-col gap-2.5">
         {[
-          { term: "Alpha", def: "Annualised excess return of a ticker vs the SPY benchmark. Positive = outperforming the market; negative = lagging. Calculated over 30-day and 90-day rolling windows." },
-          { term: "Slippage Window", def: "A moment when the bid-ask spread is unusually tight — less than 66% of its 20-tick rolling average. This low-friction window lets the agent enter or exit a position cheaply with minimal market impact." },
-          { term: "HFT Window", def: "High-Frequency Trading window: volume delta spiked more than 2σ above average AND spread compressed more than 10% simultaneously. A short-lived microstructure opportunity." },
-          { term: "Price Divergence", def: "Two correlated tickers (e.g. AAPL/QQQ) have drifted apart by more than 2 standard deviations. The agent bets on mean-reversion — that prices will converge again." },
-          { term: "Sharpe Ratio", def: "Risk-adjusted return: (annualised return − 5% risk-free rate) ÷ annualised volatility. Above 1.0 is good; above 2.0 is excellent; negative means the position doesn't compensate for its risk." },
-          { term: "14d Momentum", def: "Rate-of-change over the last 14 trading days: (close today − close 14d ago) ÷ close 14d ago. Positive = trending up. Used as secondary confirmation alongside alpha." },
-          { term: "Confidence %", def: "0–100 score that aggregates direction agreement between 30d/90d alpha (40 pts), Sharpe strength (0–40 pts), and momentum magnitude (10–20 pts)." },
-          { term: "VaR (Value at Risk)", def: "Estimated maximum loss on a position in a single day at a given confidence level. A 1-day VaR of 1.5% means the agent expects losses to stay below 1.5% on 95% of trading days." },
-          { term: "Beta", def: "Sensitivity of a stock's returns relative to the market (SPY). Beta > 1 = amplified moves; Beta < 1 = muted moves; Beta < 0 = inversely correlated." },
-          { term: "Arb Confidence", def: "How strong the arbitrage signal is (0–1). For Slippage Window: how far the spread is below the rolling average. For Price Divergence: how many standard deviations the pair has drifted above 2.0." },
-          { term: "Epoch", def: "One full Overmind optimization cycle. After each epoch, the agent evaluates its decisions, updates parameters, and starts the next learning cycle." },
-          { term: "Senso", def: "The risk gate layer that approves or rejects decisions. It applies a score threshold (≥ 0.3) and a probabilistic gate to control position frequency and risk exposure." },
-          { term: "Overmind", def: "The meta-learning loop that evaluates performance across epochs and adjusts agent parameters — lookback periods, stop-loss levels, position sizes, and entry thresholds." },
+          {
+            term: "Alpha",
+            def: "Annualised excess return of a ticker vs the SPY benchmark. Positive = outperforming the market; negative = lagging. Calculated over 30-day and 90-day rolling windows.",
+          },
+          {
+            term: "Slippage Window",
+            def: "A moment when the bid-ask spread is unusually tight — less than 66% of its 20-tick rolling average. This low-friction window lets the agent enter or exit a position cheaply with minimal market impact.",
+          },
+          {
+            term: "HFT Window",
+            def: "High-Frequency Trading window: volume delta spiked more than 2σ above average AND spread compressed more than 10% simultaneously. A short-lived microstructure opportunity.",
+          },
+          {
+            term: "Price Divergence",
+            def: "Two correlated tickers (e.g. AAPL/QQQ) have drifted apart by more than 2 standard deviations. The agent bets on mean-reversion — that prices will converge again.",
+          },
+          {
+            term: "Sharpe Ratio",
+            def: "Risk-adjusted return: (annualised return − 5% risk-free rate) ÷ annualised volatility. Above 1.0 is good; above 2.0 is excellent; negative means the position doesn't compensate for its risk.",
+          },
+          {
+            term: "14d Momentum",
+            def: "Rate-of-change over the last 14 trading days: (close today − close 14d ago) ÷ close 14d ago. Positive = trending up. Used as secondary confirmation alongside alpha.",
+          },
+          {
+            term: "Confidence %",
+            def: "0–100 score that aggregates direction agreement between 30d/90d alpha (40 pts), Sharpe strength (0–40 pts), and momentum magnitude (10–20 pts).",
+          },
+          {
+            term: "VaR (Value at Risk)",
+            def: "Estimated maximum loss on a position in a single day at a given confidence level. A 1-day VaR of 1.5% means the agent expects losses to stay below 1.5% on 95% of trading days.",
+          },
+          {
+            term: "Beta",
+            def: "Sensitivity of a stock's returns relative to the market (SPY). Beta > 1 = amplified moves; Beta < 1 = muted moves; Beta < 0 = inversely correlated.",
+          },
+          {
+            term: "Arb Confidence",
+            def: "How strong the arbitrage signal is (0–1). For Slippage Window: how far the spread is below the rolling average. For Price Divergence: how many standard deviations the pair has drifted above 2.0.",
+          },
+          {
+            term: "Epoch",
+            def: "One full Overmind optimization cycle. After each epoch, the agent evaluates its decisions, updates parameters, and starts the next learning cycle.",
+          },
+          {
+            term: "Senso",
+            def: "The risk gate layer that approves or rejects decisions. It applies a score threshold (≥ 0.3) and a probabilistic gate to control position frequency and risk exposure.",
+          },
+          {
+            term: "Overmind",
+            def: "The meta-learning loop that evaluates performance across epochs and adjusts agent parameters — lookback periods, stop-loss levels, position sizes, and entry thresholds.",
+          },
         ].map((g) => (
           <div key={g.term} className="flex gap-2">
-            <span className="text-[11px] font-bold text-zinc-200 shrink-0 w-36">{g.term}</span>
-            <span className="text-[11px] text-zinc-400 leading-relaxed">{g.def}</span>
+            <span className="text-[11px] font-bold text-zinc-200 shrink-0 w-36">
+              {g.term}
+            </span>
+            <span className="text-[11px] text-zinc-400 leading-relaxed">
+              {g.def}
+            </span>
           </div>
         ))}
       </div>
@@ -1605,7 +1753,7 @@ export default function AgentDashboard() {
         <div className="flex items-center gap-3">
           <div>
             <h1 className="text-lg font-bold text-white tracking-tight">
-              Overmind Agent Console
+              QuantMind Agent
             </h1>
             <p className="text-[11px] text-zinc-500 mt-0.5">
               Tickers: {WATCHED.join(", ")} · Benchmarks:{" "}
