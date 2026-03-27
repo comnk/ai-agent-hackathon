@@ -15,8 +15,9 @@ def _annualized_return(series: pd.Series) -> float:
     """Convert a daily-close series to an annualized return."""
     if len(series) < 2:
         return 0.0
-    total = series.iloc[-1] / series.iloc[0] - 1
-    n_days = len(series)
+    s = series.astype(float)
+    total = s.iloc[-1] / s.iloc[0] - 1
+    n_days = len(s)
     return (1 + total) ** (TRADING_DAYS / n_days) - 1
 
 
@@ -30,7 +31,7 @@ def _rolling_alpha(prices: pd.DataFrame, window: int) -> float:
 
 def _sharpe(prices: pd.DataFrame) -> float:
     """Compute Sharpe ratio using all available close prices."""
-    daily = prices["close"].pct_change().dropna()
+    daily = prices["close"].astype(float).pct_change().dropna()
     if daily.std() == 0:
         return 0.0
     excess = daily.mean() * TRADING_DAYS - RISK_FREE_RATE
@@ -42,8 +43,8 @@ def _momentum_14d(prices: pd.DataFrame) -> float:
     """Rate-of-change momentum over the last 14 trading days."""
     if len(prices) < 15:
         return 0.0
-    close_today = prices["close"].iloc[-1]
-    close_14d = prices["close"].iloc[-15]
+    close_today = float(prices["close"].iloc[-1])
+    close_14d = float(prices["close"].iloc[-15])
     if close_14d == 0:
         return 0.0
     return round((close_today - close_14d) / close_14d, 6)

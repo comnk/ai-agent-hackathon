@@ -78,8 +78,9 @@ async def _run_cycle() -> None:
     """Execute one full decision cycle and update module-level state."""
     global latest_decisions
 
-    alpha_scores = compute_alpha_scores()
-    arb_opps = detect_arbitrage_opportunities()
+    loop = asyncio.get_event_loop()
+    alpha_scores = await loop.run_in_executor(None, compute_alpha_scores)
+    arb_opps = await loop.run_in_executor(None, detect_arbitrage_opportunities)
     opportunities = _build_unified_opportunities(alpha_scores, arb_opps)
 
     cycle_decisions: list[dict[str, Any]] = []
